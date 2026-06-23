@@ -1,0 +1,120 @@
+import React, { useState } from "react";
+import { C } from "../constants";
+import { Pill } from "./ui";
+
+const TICKETS = [
+  { id: "TK-1042", user: "Lars Becker",   subj: "Lieferschein DC9 fehlt in Pulpo",        status: "auto",      rt: "0.4 Min", date: "Heute 09:12" },
+  { id: "TK-1041", user: "Nina Becker",   subj: "Adressfehler Bestellung #4821",           status: "auto",      rt: "0.7 Min", date: "Heute 08:55" },
+  { id: "TK-1040", user: "Tobias Gumtow", subj: "Bestellung P91111 – EAN fehlt",           status: "forwarded", rt: "1.2 Min", date: "Heute 08:33" },
+  { id: "TK-1039", user: "Lars Fischer",  subj: "Weclapp Sync fehlgeschlagen",             status: "open",      rt: "—",       date: "Heute 08:20" },
+  { id: "TK-1038", user: "Nina Becker",   subj: "DHL-Tracking Paket 1234567890",           status: "forwarded", rt: "2.8 Min", date: "Gestern 17:44" },
+  { id: "TK-1037", user: "Lars Becker",   subj: "Rücksendung DC3 Artikel 00712",           status: "auto",      rt: "0.3 Min", date: "Gestern 16:30" },
+  { id: "TK-1036", user: "Tobias Gumtow", subj: "Carrier-Auswahl Schenker vs. DHL",        status: "auto",      rt: "0.9 Min", date: "Gestern 15:11" },
+];
+
+const EMPLOYEES = [
+  { name: "Tobias Gumtow", init: "TG", bg: "#CECBF6", tc: "#3C3489", total: 87, auto: 61, fwd: 19, open: 7, rt: "1.2 Min" },
+  { name: "Nina Becker",   init: "NB", bg: "#9FE1CB", tc: "#085041", total: 74, auto: 48, fwd: 20, open: 6, rt: "0.9 Min" },
+  { name: "Lars Fischer",  init: "LF", bg: "#B5D4F4", tc: "#0C447C", total: 65, auto: 38, fwd: 22, open: 5, rt: "2.1 Min" },
+  { name: "Jonas Püttmann",init: "JP", bg: "#CECBF6", tc: "#3C3489", total: 41, auto: 32, fwd: 7,  open: 2, rt: "0.8 Min" },
+];
+
+const statusPill = s => ({
+  auto:      <Pill color={C.green}  small>✓ Auto-gelöst</Pill>,
+  forwarded: <Pill color={C.purple} small>→ Weitergegeben</Pill>,
+  open:      <Pill color={C.amber}  small>○ Offen</Pill>,
+}[s]);
+
+export default function Dashboard() {
+  const [filter, setFilter] = useState("all");
+  const filtered = filter === "all" ? TICKETS : TICKETS.filter(t => t.status === filter);
+  const autoCount = TICKETS.filter(t => t.status === "auto").length;
+  const fwdCount  = TICKETS.filter(t => t.status === "forwarded").length;
+
+  const th = { padding: "9px 12px", textAlign: "left", fontSize: 11, fontWeight: 500, color: "#888", borderBottom: "0.5px solid #e8e8e5" };
+  const td = { padding: "10px 12px" };
+
+  return (
+    <div style={{ padding: 20, overflowY: "auto", height: "100%" }}>
+      {/* KPIs */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 20 }}>
+        {[["Tickets gesamt", TICKETS.length, "#333"], ["Auto-gelöst", autoCount, "#3B6D11"], ["Weitergegeben", fwdCount, "#534AB7"], ["Ø Antwortzeit", "1.1 Min", "#854F0B"]].map(([l, v, c]) => (
+          <div key={l} style={{ background: "#f8f8f7", borderRadius: 8, padding: "12px 14px" }}>
+            <div style={{ fontSize: 22, fontWeight: 500, color: c }}>{v}</div>
+            <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{l}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Mitarbeiter */}
+      <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 10 }}>Mitarbeiter-Auswertung</div>
+      <div style={{ border: "0.5px solid #e8e8e5", borderRadius: 10, overflow: "hidden", marginBottom: 20 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead><tr style={{ background: "#f8f8f7" }}>
+            {["Mitarbeiter","Gesamt","Verteilung","Auto-%","Ø Response","Trend"].map(h => <th key={h} style={th}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {EMPLOYEES.map(e => {
+              const autoPct = Math.round(e.auto / e.total * 100);
+              const fwdPct  = Math.round(e.fwd  / e.total * 100);
+              const openPct = 100 - autoPct - fwdPct;
+              return (
+                <tr key={e.name} style={{ borderBottom: "0.5px solid #eee" }}>
+                  <td style={td}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 26, height: 26, borderRadius: "50%", background: e.bg, color: e.tc, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 500 }}>{e.init}</div>
+                      {e.name}
+                    </div>
+                  </td>
+                  <td style={{ ...td, fontWeight: 500 }}>{e.total}</td>
+                  <td style={{ ...td, width: 160 }}>
+                    <div style={{ height: 10, borderRadius: 4, overflow: "hidden", display: "flex", gap: 1 }}>
+                      <div style={{ flex: e.auto, background: "#639922" }} />
+                      <div style={{ flex: e.fwd,  background: "#534AB7" }} />
+                      <div style={{ flex: e.open, background: "#EF9F27" }} />
+                    </div>
+                    <div style={{ fontSize: 10, color: "#aaa", marginTop: 2 }}>{e.auto} auto · {e.fwd} fwd · {e.open} offen</div>
+                  </td>
+                  <td style={{ ...td, fontWeight: 500, color: autoPct >= 70 ? "#3B6D11" : "#854F0B" }}>{autoPct}%</td>
+                  <td style={{ ...td, color: "#888" }}>{e.rt}</td>
+                  <td style={td}>{autoPct >= 70 ? "↑" : "→"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Filter */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        {[["all","Alle"],["auto","Auto-gelöst"],["forwarded","Weitergegeben"],["open","Offen"]].map(([v, l]) => (
+          <button key={v} onClick={() => setFilter(v)} style={{
+            fontSize: 12, padding: "5px 12px", borderRadius: 16, border: "0.5px solid", cursor: "pointer", fontFamily: "inherit",
+            borderColor: filter === v ? "#534AB7" : "#ccc", background: filter === v ? "#534AB7" : "white", color: filter === v ? "white" : "#666",
+          }}>{l}</button>
+        ))}
+      </div>
+
+      {/* Tickets */}
+      <div style={{ border: "0.5px solid #e8e8e5", borderRadius: 10, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead><tr style={{ background: "#f8f8f7" }}>
+            {["ID","Erstellt von","Betreff","Status","Response","Erstellt"].map(h => <th key={h} style={th}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {filtered.map(t => (
+              <tr key={t.id} style={{ borderBottom: "0.5px solid #eee" }}>
+                <td style={{ ...td, fontFamily: "monospace", fontSize: 11, color: "#888" }}>{t.id}</td>
+                <td style={td}>{t.user}</td>
+                <td style={td}>{t.subj}</td>
+                <td style={td}>{statusPill(t.status)}</td>
+                <td style={{ ...td, color: "#888" }}>{t.rt}</td>
+                <td style={{ ...td, color: "#aaa", fontSize: 11 }}>{t.date}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
