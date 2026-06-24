@@ -1,871 +1,603 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Altruan Bot Manager</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
-body{background:#f0efeb}
-@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}
-input,select,button{font-family:inherit;outline:none}
-::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#ddd;border-radius:2px}
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --tp:#534AB7; --tp-light:#EEEDFE; --bg:#ffffff; --side:#f8f8f7;
+    --bd:#e8e8e5; --bd2:#eee; --tx:#333; --mut:#888; --mut2:#aaa; --grn:#639922;
+  }
+  html,body{height:100%}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--tx);background:var(--bg);-webkit-font-smoothing:antialiased}
+  #root{height:100vh}
+  button{font-family:inherit;cursor:pointer}
+  input,select,textarea{font-family:inherit}
+  .layout{display:grid;grid-template-columns:210px 1fr;height:100vh}
+  .side{background:var(--side);border-right:.5px solid var(--bd);display:flex;flex-direction:column;min-width:0}
+  .brand{padding:14px 16px;border-bottom:.5px solid var(--bd);display:flex;align-items:center;gap:10px}
+  .logo{width:30px;height:30px;background:var(--tp);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+  .nav{flex:1;padding:8px;overflow:auto}
+  .navitem{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;font-size:13px;color:#666;user-select:none;border-left:2px solid transparent}
+  .navitem:hover{background:#f0f0ee}
+  .navitem.active{background:#fff;color:var(--tx);font-weight:500;border-left:2px solid var(--tp)}
+  .badge-admin{font-size:10px;background:var(--tp-light);color:var(--tp);padding:2px 6px;border-radius:4px;margin-left:auto}
+  .userbox{padding:12px 14px;border-top:.5px solid var(--bd);display:flex;align-items:center;gap:8px}
+  .av{border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0}
+  .main{display:flex;flex-direction:column;min-width:0}
+  .topbar{padding:11px 18px;border-bottom:.5px solid var(--bd);display:flex;align-items:center;justify-content:space-between;background:#fff}
+  .topbar h1{font-size:15px;font-weight:500}
+  .topbar .sub{font-size:11px;color:var(--mut2)}
+  .conn{display:flex;align-items:center;gap:8px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--grn)}
+  .content{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+  /* chat */
+  .chatwrap{flex:1;display:flex;flex-direction:column;min-height:0}
+  .msgs{flex:1;overflow:auto;padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+  .row{display:flex;gap:10px;max-width:78%}
+  .row.bot{align-self:flex-start}
+  .row.me{align-self:flex-end;flex-direction:row-reverse}
+  .bubble{padding:10px 13px;border-radius:12px;font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+  .row.bot .bubble{background:#f4f4f3;border:.5px solid var(--bd)}
+  .row.me .bubble{background:var(--tp);color:#fff}
+  .time{font-size:10px;color:var(--mut2);margin-top:4px}
+  .inputbar{border-top:.5px solid var(--bd);padding:12px 18px;display:flex;gap:10px;align-items:flex-end;background:#fff}
+  .inputbar textarea{flex:1;border:.5px solid #ccc;border-radius:10px;padding:10px 13px;font-size:13.5px;resize:none;max-height:120px;line-height:1.4}
+  .send{background:var(--tp);color:#fff;border:none;border-radius:10px;padding:0 18px;height:40px;font-size:13px;font-weight:500}
+  .send:disabled{opacity:.5;cursor:not-allowed}
+  .typing{display:flex;gap:4px;padding:12px 14px}
+  .typing span{width:7px;height:7px;border-radius:50%;background:#bbb;animation:tp 1.2s infinite}
+  .typing span:nth-child(2){animation-delay:.2s}.typing span:nth-child(3){animation-delay:.4s}
+  @keyframes tp{0%,60%,100%{opacity:.3}30%{opacity:1}}
+  /* card / form */
+  .card{background:#fff;border:.5px solid var(--bd);border-radius:12px;padding:14px 16px;margin-top:6px;max-width:420px}
+  .card h3{font-size:13px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .field{margin-bottom:9px}
+  .field label{display:block;font-size:11px;color:var(--mut);margin-bottom:3px}
+  .field input,.field select{width:100%;padding:8px 10px;border:.5px solid #ccc;border-radius:7px;font-size:13px}
+  .pri{background:var(--tp);color:#fff;border:none;border-radius:7px;padding:8px 14px;font-size:12.5px;font-weight:500}
+  .sec{background:#fff;color:var(--tx);border:.5px solid #ccc;border-radius:7px;padding:8px 14px;font-size:12.5px}
+  .status-card{background:#f8f8f7;border:.5px solid var(--bd);border-radius:10px;padding:12px 14px;margin-top:6px;max-width:420px}
+  .sync-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:6px 0;border-bottom:.5px solid var(--bd2)}
+  .sync-row:last-child{border-bottom:none}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  /* dashboard */
+  .scroll{flex:1;overflow:auto;padding:22px}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+  .kpi{background:#fff;border:.5px solid var(--bd);border-radius:12px;padding:16px}
+  .kpi .num{font-size:26px;font-weight:600}
+  .kpi .lbl{font-size:11px;color:var(--mut);margin-top:2px}
+  .panel{background:#fff;border:.5px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:18px}
+  .panel h2{font-size:13px;font-weight:600;margin-bottom:14px}
+  .bars{display:flex;gap:18px;align-items:flex-end;height:170px;padding:0 6px}
+  .barcol{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+  .barstack{width:46px;border-radius:6px 6px 0 0;overflow:hidden;display:flex;flex-direction:column-reverse}
+  .barname{font-size:11px;color:var(--mut)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{text-align:left;padding:9px 10px;color:var(--mut);font-weight:500;border-bottom:.5px solid var(--bd);font-size:11px}
+  td{padding:9px 10px;border-bottom:.5px solid var(--bd2)}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500}
+  .filterbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .fbtn{border:.5px solid #ccc;background:#fff;border-radius:20px;padding:5px 12px;font-size:12px;color:#555}
+  .fbtn.on{background:var(--tp);color:#fff;border-color:var(--tp)}
+  /* api manager */
+  .api-card{background:#fff;border:.5px solid var(--bd);border-radius:10px;padding:13px 15px;margin-bottom:10px;display:flex;align-items:center;gap:12px}
+  .api-card .nm{font-size:13px;font-weight:500}
+  .api-card .ur{font-size:11px;color:var(--mut2);font-family:ui-monospace,monospace}
+  .cat{font-size:10px;padding:2px 8px;border-radius:5px;background:#f0eefb;color:var(--tp);font-weight:500}
+  .lock{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;color:var(--mut2)}
+  /* settings */
+  .setbox{background:#fff;border:.5px solid var(--bd);border-radius:12px;padding:18px;max-width:520px;margin-bottom:16px}
+  .setbox h2{font-size:13px;font-weight:600;margin-bottom:6px}
+  .setbox p{font-size:11.5px;color:var(--mut);margin-bottom:12px;line-height:1.5}
+  .setbox input{width:100%;padding:9px 12px;border:.5px solid #ccc;border-radius:7px;font-size:13px;font-family:ui-monospace,monospace;margin-bottom:10px}
+  .info-row{display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:.5px solid var(--bd2)}
+  .info-row span:first-child{color:var(--mut)}
+  .info-row span:last-child{font-weight:500}
+  .foot{font-size:10.5px;color:var(--mut2);text-align:center;padding:10px}
+  .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--mut2);gap:10px;font-size:13px}
+  .select-card{display:flex;gap:14px;flex-wrap:wrap;padding:30px;justify-content:center;align-content:center;flex:1}
+  .opt{width:200px;border:.5px solid var(--bd);border-radius:14px;padding:24px;text-align:center;background:#fff}
+  .opt:hover{border-color:var(--tp);box-shadow:0 2px 10px rgba(83,74,183,.1)}
+  .opt .ic{font-size:30px;margin-bottom:10px}
+  .opt .t{font-size:14px;font-weight:600;margin-bottom:5px}
+  .opt .d{font-size:11.5px;color:var(--mut)}
+  @media(max-width:720px){.layout{grid-template-columns:1fr}.side{display:none}.kpis{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
-<div id="app"></div>
+<div id="root"></div>
 <script>
-// ── Pure vanilla JS – no framework needed ────────────────────────────────────
-const TP = "#464775";
+"use strict";
+(function(){
 
-const USERS = [
-  {id:1,init:"TG",name:"Tobias Gumtow",role:"Leiter Logistik",admin:false,bg:"#CECBF6",tc:"#3C3489"},
-  {id:2,init:"NB",name:"Nina Becker",role:"Sachbearbeiterin",admin:false,bg:"#9FE1CB",tc:"#085041"},
-  {id:3,init:"LF",name:"Lars Fischer",role:"Lagerist",admin:false,bg:"#B5D4F4",tc:"#0C447C"},
-  {id:4,init:"AD",name:"Admin",role:"Vollzugriff",admin:true,bg:"#D3D1C7",tc:"#444441"},
-  {id:5,init:"JP",name:"Jonas Püttmann",role:"Administrator",admin:true,bg:"#CECBF6",tc:"#3C3489"},
-];
-
-const DEFAULT_APIS = [
-  {id:1,name:"Salesforce",cat:"CRM",key:"sf_••••••2b19",env:"prod",status:"active"},
-  {id:2,name:"Zendesk",cat:"Ticketing",key:"zd_••••••5e72",env:"prod",status:"warn"},
-  {id:3,name:"Jira",cat:"Ticketing",key:"jira_••••7d88",env:"prod",status:"active"},
-  {id:4,name:"Weclapp",cat:"ERP",key:"wc_••••••3f2a",env:"prod",status:"active"},
-  {id:5,name:"Pulpo WMS",cat:"WMS",key:"pu_••••••9c41",env:"prod",status:"active"},
-  {id:6,name:"DHL",cat:"Carrier",key:"dhl_•••••4a03",env:"prod",status:"active"},
-  {id:7,name:"DB Schenker",cat:"Carrier",key:"— ausstehend",env:"prod",status:"inactive"},
-  {id:8,name:"Microsoft Teams",cat:"Messaging",key:"az_••••••7b25",env:"stage",status:"warn"},
-  {id:9,name:"Shopify",cat:"Shop",key:"— ausstehend",env:"prod",status:"inactive"},
-  {id:10,name:"Miracle",cat:"Marktplatz",key:"— ausstehend",env:"prod",status:"inactive"},
-];
-
-const MOCK_ORDERS = {
-  "ORD-10042":{email:"jonas.puettmann@altruan.de",name:"Jonas Püttmann",items:"Schreibtischlampe LED Pro × 2",status:"Versandt",carrier:"DHL",tracking:"1234567890",eta:"Morgen bis 18 Uhr"},
-  "TEST-0001":{email:"test@test.de",name:"Test Kunde",items:"Testartikel × 1",status:"Versandt",carrier:"DHL",tracking:"9876543210",eta:"Übermorgen"},
+/* ---------- storage shim (localStorage on GitHub Pages, memory fallback) ---------- */
+var mem={};
+var store={
+  get:function(k){try{var v=localStorage.getItem(k);return v===null?(k in mem?mem[k]:null):v;}catch(e){return k in mem?mem[k]:null;}},
+  set:function(k,v){try{localStorage.setItem(k,v);}catch(e){mem[k]=v;}}
 };
 
-const SYS_PROMPT = `Du bist der Altruan Assistent – KI-Logistik-Assistent der Firma Altruan. Antworte auf Deutsch, präzise, freundlich.
-Systeme: Weclapp (ERP), Pulpo WMS, Jira, Zendesk, Salesforce, DHL, DB Schenker, Shopify, Miracle, Teams.
-Sync: Lieferungen 3 Min · Bestellungen 20 Min · Produkte 60 Min. Nach 2 Sync-Fehlern → Jira-Ticket.
-Bei Adressfehlern: vollständige Adresse anfordern (Name, Straße, PLZ, Stadt, Land). Kurz und direkt antworten.`;
-
-const CUST_PROMPT = `Du bist der Altruan Kunden-Assistent. Antworte auf Deutsch, freundlich und empathisch. Hilf bei Bestellfragen, Tracking und Rücksendungen.`;
-
-let currentUser = USERS[0];
-let currentView = "chat";
-let messages = {}; // userId -> array
-let apis = JSON.parse(localStorage.getItem("altruan_apis") || "null") || DEFAULT_APIS;
-let syncTimer = null, syncRemaining = 600, syncRunning = false, syncAttempts = 0;
-let typing = false;
-let custStep = "select", custMode = null, custVerified = null, custTicket = null;
-let custMsgs = [];
-let ticketCounter = 1001;
-
-const tnow = () => { const d=new Date(); return d.getHours()+":"+String(d.getMinutes()).padStart(2,"0"); };
-const uid = () => Date.now()+Math.random();
-const delay = ms => new Promise(r=>setTimeout(r,ms));
-const $ = id => document.getElementById(id);
-const saveApis = () => localStorage.setItem("altruan_apis", JSON.stringify(apis));
-
-// ── Render helpers ────────────────────────────────────────────────────────────
-function h(tag, attrs={}, ...children) {
-  const el = document.createElement(tag);
-  for (const [k,v] of Object.entries(attrs)) {
-    if (k === "style" && typeof v === "object") Object.assign(el.style, v);
-    else if (k.startsWith("on")) el.addEventListener(k.slice(2).toLowerCase(), v);
-    else el.setAttribute(k, v);
+/* ---------- tiny DOM helper ---------- */
+function el(tag,props){
+  var n=document.createElement(tag),i,c;
+  if(props){
+    for(var k in props){
+      var v=props[k];
+      if(k==="style"&&typeof v==="object"){for(var s in v)n.style[s]=v[s];}
+      else if(k==="class")n.className=v;
+      else if(k.slice(0,2)==="on"&&typeof v==="function")n.addEventListener(k.slice(2).toLowerCase(),v);
+      else if(k==="html")n.innerHTML=v;
+      else if(v!=null&&v!==false)n.setAttribute(k,v===true?"":v);
+    }
   }
-  for (const c of children.flat()) {
-    if (c == null || c === false) continue;
-    el.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+  for(i=2;i<arguments.length;i++){
+    c=arguments[i];
+    if(c==null||c===false)continue;
+    if(Array.isArray(c))c.forEach(function(x){if(x!=null&&x!==false)n.appendChild(x.nodeType?x:document.createTextNode(String(x)));});
+    else n.appendChild(c.nodeType?c:document.createTextNode(String(c)));
   }
-  return el;
+  return n;
+}
+function clear(n){while(n.firstChild)n.removeChild(n.firstChild);}
+function now(){var d=new Date();return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);}
+function uid(){return Math.random().toString(36).slice(2,8);}
+
+/* ---------- data ---------- */
+var USERS=[
+  {id:"u1",name:"Tobias Gumtow",role:"Logistik",init:"TG",bg:"#E3F0FF",tc:"#1C5FB8",admin:false},
+  {id:"u2",name:"Nina Becker",role:"Kundenservice",init:"NB",bg:"#FDE8F3",tc:"#B8327C",admin:false},
+  {id:"u3",name:"Lars Fischer",role:"Einkauf",init:"LF",bg:"#E7F6EC",tc:"#2C8C52",admin:false},
+  {id:"u4",name:"Admin",role:"Administrator",init:"AD",bg:"#EEEDFE",tc:"#534AB7",admin:true}
+];
+
+var DEFAULT_APIS=[
+  {id:"a1",name:"Weclapp",cat:"ERP",url:"https://altruan.weclapp.com/webapp/api/v1"},
+  {id:"a2",name:"Pulpo WMS",cat:"Lager",url:"https://api.pulpo.com/v2"},
+  {id:"a3",name:"Jira",cat:"Eskalation",url:"https://altruan.atlassian.net/rest/api/3"},
+  {id:"a4",name:"Salesforce",cat:"CRM",url:"https://altruan.my.salesforce.com/services/data/v59"},
+  {id:"a5",name:"Zendesk",cat:"Support",url:"https://altruan.zendesk.com/api/v2"},
+  {id:"a6",name:"DHL",cat:"Versand",url:"https://api-eu.dhl.com/track/shipments"},
+  {id:"a7",name:"Schenker",cat:"Versand",url:"https://api.dbschenker.com/v1"},
+  {id:"a8",name:"Microsoft Teams",cat:"Channel",url:"https://smba.trafficmanager.net/teams"},
+  {id:"a9",name:"Shopify",cat:"Shop",url:"https://altruan.myshopify.com/admin/api/2024-01"},
+  {id:"a10",name:"Miracle",cat:"Buchhaltung",url:"https://api.miracle-software.de/v1"}
+];
+
+var TICKETS=[
+  {nr:"AB-2041",user:"Tobias Gumtow",cat:"EAN-Fehler",status:"gelöst"},
+  {nr:"AB-2042",user:"Nina Becker",cat:"Adresskorrektur",status:"gelöst"},
+  {nr:"AB-2043",user:"Lars Fischer",cat:"Sync-Eskalation",status:"eskaliert"},
+  {nr:"AB-2044",user:"Tobias Gumtow",cat:"DHL-Tracking",status:"in Bearbeitung"},
+  {nr:"AB-2045",user:"Nina Becker",cat:"Rücksendung",status:"gelöst"},
+  {nr:"AB-2046",user:"Tobias Gumtow",cat:"EAN-Fehler",status:"offen"},
+  {nr:"AB-2047",user:"Lars Fischer",cat:"Adresskorrektur",status:"gelöst"},
+  {nr:"AB-2048",user:"Nina Becker",cat:"DHL-Tracking",status:"in Bearbeitung"}
+];
+
+var STATUS_COLORS={
+  "gelöst":{bg:"#E7F6EC",c:"#2C8C52"},
+  "in Bearbeitung":{bg:"#FFF4E0",c:"#C7891F"},
+  "offen":{bg:"#EEF2F7",c:"#5A6B82"},
+  "eskaliert":{bg:"#FCE8E8",c:"#C53A3A"}
+};
+
+function getApis(){var raw=store.get("altruan_apis");if(raw){try{return JSON.parse(raw);}catch(e){}}return DEFAULT_APIS.slice();}
+function saveApis(a){store.set("altruan_apis",JSON.stringify(a));}
+function getKey(){return store.get("altruan_api_key")||"";}
+
+/* ---------- Claude API ---------- */
+function callClaude(messages,system,cb){
+  var key=getKey();
+  if(!key){cb(null,"NO_KEY");return;}
+  fetch("https://api.anthropic.com/v1/messages",{
+    method:"POST",
+    headers:{
+      "content-type":"application/json",
+      "x-api-key":key,
+      "anthropic-version":"2023-06-01",
+      "anthropic-dangerous-direct-browser-access":"true"
+    },
+    body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1024,system:system,messages:messages})
+  }).then(function(r){return r.json();}).then(function(data){
+    if(data.error){cb(null,data.error.message||"API-Fehler");return;}
+    var txt=(data.content||[]).filter(function(b){return b.type==="text";}).map(function(b){return b.text;}).join("\n");
+    cb(txt||"(keine Antwort)",null);
+  }).catch(function(e){cb(null,e.message||"Netzwerkfehler");});
 }
 
-function btn(label, primary, onClick, small, danger) {
-  return h("button", {
-    style:{fontSize:small?11:13,padding:small?"4px 10px":"8px 16px",borderRadius:7,border:`1px solid ${primary?"#534AB7":danger?"#E24B4A":"#ccc"}`,background:primary?"#534AB7":danger?"#FCEBEB":"white",color:primary?"#EEEDFE":danger?"#A32D2D":"#444",cursor:"pointer",display:"inline-flex",alignItems:"center",gap:5},
-    onClick
-  }, label);
+var EMP_SYSTEM=
+"Du bist der Altruan Logistik-Assistent, ein interner KI-Bot für Mitarbeiter eines Sanitäts- und Logistikunternehmens. "+
+"Antworte auf Deutsch, knapp, freundlich und lösungsorientiert. Du hast Zugriff auf folgende Systeme: Weclapp (ERP), "+
+"Pulpo (Lager/WMS), Jira (Eskalation), Salesforce (CRM), Zendesk, DHL & Schenker (Versand), Shopify, Miracle. "+
+"Synchronisierung: Lieferungen nach Pulpo alle 3 Minuten, Lieferanten-Bestellungen alle 20 Minuten, Produkte alle 60 Minuten. "+
+"Eskalation an Jira erfolgt nach 2 Fehlversuchen. "+
+"Wenn der Mitarbeiter einen EAN-/Artikelnummer-Fehler meldet, fordere die Daten an und beende deine Antwort mit der eigenen Zeile [[EAN_FORM]]. "+
+"Wenn es um eine Adresskorrektur geht, beende mit der eigenen Zeile [[ADRESS_FORM]]. "+
+"Wenn nach Sync-/Schnittstellen-Status gefragt wird, beende mit der eigenen Zeile [[SYNC_STATUS]]. "+
+"Verwende diese Marker höchstens einmal pro Antwort und nur wenn wirklich passend.";
+
+var CUST_SYSTEM=
+"Du bist der Altruan Kunden-Assistent. Antworte auf Deutsch, freundlich, empathisch und kurz. "+
+"Du hilfst bei Bestellungen, Lieferungen, Angeboten und Rücksendungen. Bei komplexen Fällen kündigst du an, "+
+"dass ein Mitarbeiter sich meldet (Ticket wurde erstellt).";
+
+/* ============================================================ APP ============ */
+var root=document.getElementById("root");
+var state={view:"chat",user:USERS[0]};
+
+var NAV=[
+  {id:"chat",label:"Chat",icon:"💬"},
+  {id:"dashboard",label:"Dashboard",icon:"📊"},
+  {id:"customer",label:"Kunden-Chat",icon:"🛍"},
+  {id:"apis",label:"API-Schnittstellen",icon:"🔌",adminOnly:true},
+  {id:"settings",label:"Einstellungen",icon:"⚙️"}
+];
+var TITLES={chat:"💬 Altruan Assistent",dashboard:"📊 Dashboard",customer:"🛍 Kunden-Chat",apis:"🔌 API-Schnittstellen",settings:"⚙️ Einstellungen"};
+var SUBS={chat:"Privater Chat · vertraulich",dashboard:"Ticket-Übersicht & Statistiken",customer:"Kunden-Portal",apis:"Schnittstellen verwalten – kein Code nötig",settings:"Bot-Konfiguration"};
+
+function avatar(u,size){
+  return el("div",{class:"av",style:{width:size+"px",height:size+"px",background:u.bg,color:u.tc,fontSize:(size*0.36)+"px"}},u.init);
 }
 
-function avatar(init, bg, tc, size=32, online=false) {
-  const wrap = h("div",{style:{position:"relative",flexShrink:0}},
-    h("div",{style:{width:size+"px",height:size+"px",borderRadius:"50%",background:bg,color:tc,display:"flex",alignItems:"center",justifyContent:"center",fontSize:Math.round(size*.34)+"px",fontWeight:500}},init)
+function render(){
+  clear(root);
+  var side=el("div",{class:"side"},
+    el("div",{class:"brand"},
+      el("div",{class:"logo"},"🤖"),
+      el("div",{},
+        el("div",{style:{fontSize:"13px",fontWeight:"500"}},"Bot Manager"),
+        el("div",{style:{fontSize:"10px",color:"var(--mut2)"}},"Altruan")
+      )
+    ),
+    el("div",{class:"nav"},NAV.map(function(n){
+      var active=state.view===n.id;
+      return el("div",{class:"navitem"+(active?" active":""),onClick:function(){state.view=n.id;render();}},
+        el("span",{},n.icon),
+        el("span",{},n.label),
+        n.adminOnly?el("span",{class:"badge-admin"},"Admin"):null
+      );
+    })),
+    el("div",{class:"userbox"},
+      avatar(state.user,30),
+      el("div",{},
+        el("div",{style:{fontSize:"12px",fontWeight:"500"}},state.user.name),
+        el("div",{style:{fontSize:"10px",color:"var(--mut2)"}},state.user.role)
+      )
+    ),
+    el("div",{class:"foot"},"© Altruan · Jonas Püttmann")
   );
-  if (online) wrap.appendChild(h("div",{style:{width:"9px",height:"9px",borderRadius:"50%",background:"#639922",position:"absolute",bottom:0,right:0,border:"2px solid white"}}));
+
+  // user switcher inside brand area (small select)
+  var switcher=el("select",{
+    style:{margin:"0 16px 10px",padding:"6px 8px",border:".5px solid #ccc",borderRadius:"7px",fontSize:"12px",width:"calc(100% - 32px)"},
+    onChange:function(e){state.user=USERS[e.target.selectedIndex];if(state.view==="apis"&&!state.user.admin){}render();}
+  },USERS.map(function(u){return el("option",{value:u.id},u.name+(u.admin?" (Admin)":""));}));
+  switcher.selectedIndex=USERS.indexOf(state.user);
+  side.insertBefore(switcher,side.querySelector(".userbox"));
+
+  var topbar=el("div",{class:"topbar"},
+    el("div",{},
+      el("h1",{},TITLES[state.view]),
+      el("div",{class:"sub"},SUBS[state.view])
+    ),
+    el("div",{class:"conn"},el("div",{class:"dot"}),el("span",{style:{fontSize:"11px",color:"var(--mut)"}},"Systeme verbunden"))
+  );
+
+  var content=el("div",{class:"content"});
+  if(state.view==="chat")content.appendChild(viewChat());
+  else if(state.view==="dashboard")content.appendChild(viewDashboard());
+  else if(state.view==="customer")content.appendChild(viewCustomer());
+  else if(state.view==="apis")content.appendChild(state.user.admin?viewApis():lock());
+  else if(state.view==="settings")content.appendChild(viewSettings());
+
+  root.appendChild(el("div",{class:"layout"},side,el("div",{class:"main"},topbar,content)));
+}
+
+function lock(){return el("div",{class:"lock"},el("span",{style:{fontSize:"32px"}},"🔒"),el("span",{},"Admin-Berechtigung erforderlich"));}
+
+/* ---------- inline cards ---------- */
+function eanForm(msgsBox){
+  var f=el("div",{class:"card"},el("h3",{},"📦 EAN / Artikel prüfen"));
+  function fld(lbl,id,ph){return el("div",{class:"field"},el("label",{},lbl),el("input",{id:id,placeholder:ph||""}));}
+  f.appendChild(fld("EAN","ean_ean","z.B. 4250083421337"));
+  f.appendChild(fld("Artikelnummer","ean_art","z.B. P91111"));
+  f.appendChild(fld("Bestellnummer","ean_best","optional"));
+  f.appendChild(el("button",{class:"pri",onClick:function(){
+    var ean=f.querySelector("#ean_ean").value||"—",art=f.querySelector("#ean_art").value||"—";
+    f.innerHTML="";f.appendChild(el("h3",{},"✅ EAN-Prüfung übermittelt"));
+    f.appendChild(el("div",{style:{fontSize:"12.5px",lineHeight:"1.6"}},
+      "EAN "+ean+" / Artikel "+art+" wurde zur Validierung an Weclapp & Pulpo übergeben. Korrektur wird beim nächsten Sync (max. 3 Min) übernommen."));
+  }},"Absenden"));
+  return f;
+}
+function adressForm(){
+  var f=el("div",{class:"card"},el("h3",{},"🏠 Adresskorrektur"));
+  function fld(lbl,id,ph){return el("div",{class:"field"},el("label",{},lbl),el("input",{id:id,placeholder:ph||""}));}
+  f.appendChild(fld("Bestellnummer","ad_best","z.B. AB-2042"));
+  f.appendChild(fld("Name / Firma","ad_name"));
+  f.appendChild(fld("Straße & Nr.","ad_str"));
+  var two=el("div",{style:{display:"flex",gap:"8px"}});
+  var plz=el("div",{class:"field",style:{flex:"0 0 90px"}},el("label",{},"PLZ"),el("input",{id:"ad_plz"}));
+  var ort=el("div",{class:"field",style:{flex:"1"}},el("label",{},"Ort"),el("input",{id:"ad_ort"}));
+  two.appendChild(plz);two.appendChild(ort);f.appendChild(two);
+  f.appendChild(fld("Land","ad_land","Deutschland"));
+  f.appendChild(el("button",{class:"pri",onClick:function(){
+    f.innerHTML="";f.appendChild(el("h3",{},"✅ Adresse aktualisiert"));
+    f.appendChild(el("div",{style:{fontSize:"12.5px",lineHeight:"1.6"}},
+      "Die korrigierte Adresse wurde in Weclapp & Salesforce gespeichert und an den Versanddienstleister übergeben."));
+  }},"Adresse speichern"));
+  return f;
+}
+function syncCard(){
+  var c=el("div",{class:"status-card"},el("h3",{style:{fontSize:"12px",fontWeight:"600",marginBottom:"8px"}},"🔄 Sync-Status"));
+  [["Lieferungen → Pulpo","alle 3 Min","🟢 aktiv"],
+   ["Lieferanten-Bestellungen","alle 20 Min","🟢 aktiv"],
+   ["Produkte","alle 60 Min","🟢 aktiv"],
+   ["Jira-Eskalation","nach 2 Fehlversuchen","⏳ bereit"]].forEach(function(r){
+    c.appendChild(el("div",{class:"sync-row"},el("span",{},r[0]),el("span",{class:"mono",style:{color:"var(--mut)"}},r[1]),el("span",{},r[2])));
+  });
+  return c;
+}
+
+/* ---------- CHAT VIEW ---------- */
+var chatMsgs={}; // per user id
+function viewChat(){
+  var uidKey=state.user.id;
+  if(!chatMsgs[uidKey])chatMsgs[uidKey]=[{from:"bot",text:"Hallo "+state.user.name.split(" ")[0]+"! Ich bin dein Altruan Assistent. Womit kann ich helfen – EAN-Fehler, Adresse, Tracking oder Sync-Status?",time:now()}];
+  var msgsArr=chatMsgs[uidKey];
+
+  var box=el("div",{class:"msgs"});
+  var wrap=el("div",{class:"chatwrap"},box);
+
+  function bubbleFor(m){
+    var av=m.from==="bot"?el("div",{class:"logo",style:{width:"30px",height:"30px",fontSize:"15px"}},"🤖"):avatar(state.user,30);
+    var inner=el("div",{});
+    var txt=m.text, markers=[];
+    ["[[EAN_FORM]]","[[ADRESS_FORM]]","[[SYNC_STATUS]]"].forEach(function(mk){
+      if(txt.indexOf(mk)>-1){markers.push(mk);txt=txt.split(mk).join("").trim();}
+    });
+    inner.appendChild(el("div",{class:"bubble"},txt));
+    markers.forEach(function(mk){
+      if(mk==="[[EAN_FORM]]")inner.appendChild(eanForm());
+      else if(mk==="[[ADRESS_FORM]]")inner.appendChild(adressForm());
+      else if(mk==="[[SYNC_STATUS]]")inner.appendChild(syncCard());
+    });
+    inner.appendChild(el("div",{class:"time"},m.time));
+    return el("div",{class:"row "+(m.from==="bot"?"bot":"me")},av,inner);
+  }
+  function paint(){clear(box);msgsArr.forEach(function(m){box.appendChild(bubbleFor(m));});box.scrollTop=box.scrollHeight;}
+  paint();
+
+  var ta=el("textarea",{rows:"1",placeholder:"Nachricht an den Assistenten…"});
+  var sendBtn=el("button",{class:"send"},"Senden");
+  ta.addEventListener("input",function(){ta.style.height="auto";ta.style.height=Math.min(ta.scrollHeight,120)+"px";});
+
+  function send(){
+    var v=ta.value.trim();if(!v)return;
+    msgsArr.push({from:"me",text:v,time:now()});ta.value="";ta.style.height="auto";paint();
+    var typing=el("div",{class:"row bot"},el("div",{class:"logo",style:{width:"30px",height:"30px",fontSize:"15px"}},"🤖"),el("div",{class:"typing"},el("span"),el("span"),el("span")));
+    box.appendChild(typing);box.scrollTop=box.scrollHeight;sendBtn.disabled=true;
+    var history=msgsArr.filter(function(m){return !m._sys;}).map(function(m){return {role:m.from==="me"?"user":"assistant",content:m.text};});
+    callClaude(history,EMP_SYSTEM,function(reply,err){
+      sendBtn.disabled=false;if(typing.parentNode)box.removeChild(typing);
+      if(err==="NO_KEY"){msgsArr.push({from:"bot",text:"⚠️ Bitte zuerst unter Einstellungen deinen Anthropic API-Key hinterlegen, dann antworte ich mit echter KI.",time:now()});}
+      else if(err){msgsArr.push({from:"bot",text:"⚠️ Fehler: "+err,time:now()});}
+      else{msgsArr.push({from:"bot",text:reply,time:now()});}
+      paint();
+    });
+  }
+  sendBtn.addEventListener("click",send);
+  ta.addEventListener("keydown",function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
+
+  wrap.appendChild(el("div",{class:"inputbar"},ta,sendBtn));
   return wrap;
 }
 
-function tag(text, bg, color) {
-  return h("span",{style:{fontSize:"10px",padding:"2px 7px",borderRadius:"4px",background:bg,color,fontWeight:500}},text);
-}
+/* ---------- DASHBOARD ---------- */
+function viewDashboard(){
+  var filter="alle";
+  var scroll=el("div",{class:"scroll"});
 
-function infoCard(col, icon, title, rows) {
-  return h("div",{style:{borderRadius:"10px",overflow:"hidden",border:`0.5px solid ${col.border}`,borderLeft:`3px solid ${col.strong}`,maxWidth:"88%",background:"white"}},
-    h("div",{style:{padding:"8px 12px",background:col.bg,color:col.text,fontSize:"12px",fontWeight:500}}, icon+" "+title),
-    h("div",{style:{background:"#f8f8f7",padding:"7px 12px"}},
-      ...rows.map((r,i)=>h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:"11px",padding:"3px 0",borderBottom:i<rows.length-1?"0.5px solid #eee":"none"}},
-        h("span",{style:{color:"#888"}},r[0]),
-        h("span",{style:{fontWeight:500,color:r[2]==="red"?"#A32D2D":r[2]==="green"?"#3B6D11":r[2]==="amber"?"#854F0B":"#333"}},r[1])
-      ))
-    )
-  );
-}
+  function build(){
+    clear(scroll);
+    var total=TICKETS.length;
+    var solved=TICKETS.filter(function(t){return t.status==="gelöst";}).length;
+    var esc=TICKETS.filter(function(t){return t.status==="eskaliert";}).length;
+    var quote=Math.round(solved/total*100);
+    scroll.appendChild(el("div",{class:"kpis"},
+      el("div",{class:"kpi"},el("div",{class:"num"},total),el("div",{class:"lbl"},"Tickets gesamt")),
+      el("div",{class:"kpi"},el("div",{class:"num",style:{color:"var(--grn)"}},quote+"%"),el("div",{class:"lbl"},"Automatisch gelöst")),
+      el("div",{class:"kpi"},el("div",{class:"num"},"<2 Min"),el("div",{class:"lbl"},"Ø Reaktionszeit")),
+      el("div",{class:"kpi"},el("div",{class:"num",style:{color:"#C53A3A"}},esc),el("div",{class:"lbl"},"Eskalationen"))
+    ));
 
-function typingBubble() {
-  return h("div",{style:{display:"flex",gap:"8px",alignItems:"flex-end"}},
-    avatar("AA","#EEEDFE","#534AB7",26),
-    h("div",{style:{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderRadius:"11px",borderBottomLeftRadius:"3px",padding:"9px 12px",display:"flex",gap:"4px"}},
-      ...[0,150,300].map(d=>{const dot=h("div",{style:{width:"5px",height:"5px",borderRadius:"50%",background:"#aaa",animation:`bounce .9s ${d}ms infinite`}}); return dot;})
-    )
-  );
-}
-
-function chatBubble(text, isMe, userObj) {
-  const av = isMe ? avatar(userObj?.init||"?",userObj?.bg||"#eee",userObj?.tc||"#333",26) : avatar("AA","#EEEDFE","#534AB7",26);
-  const bubble = h("div",{style:{borderRadius:"11px",padding:"9px 13px",fontSize:"13px",lineHeight:1.5,
-    ...(isMe?{background:TP,color:"white",borderBottomRightRadius:"3px"}:{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderBottomLeftRadius:"3px",color:"#222"})
-  }}, text);
-  return h("div",{style:{display:"flex",gap:"8px",alignItems:"flex-end",flexDirection:isMe?"row-reverse":"row"}},
-    av, h("div",{style:{display:"flex",flexDirection:"column",gap:"2px",maxWidth:"80%",alignItems:isMe?"flex-end":"flex-start"}}, bubble)
-  );
-}
-
-// ── App Shell ─────────────────────────────────────────────────────────────────
-function renderShell() {
-  const app = $("app");
-  app.innerHTML = "";
-
-  const nav = ["chat","dashboard","customer","apis","settings"];
-  const navLabels = {chat:"💬 Chat",dashboard:"📊 Dashboard",customer:"🛍 Kunden-Chat",apis:"🔌 API-Schnittstellen",settings:"⚙️ Einstellungen"};
-  const navSubs = {chat:"Privater Chat",dashboard:"Ticket-Übersicht",customer:"Kunden-Portal",apis:"Schnittstellen",settings:"Konfiguration"};
-
-  // Sidebar
-  const sidebarNavItems = nav.filter(v => v!=="apis" || currentUser.admin);
-  const navEls = sidebarNavItems.map(v => {
-    const el = h("div",{
-      style:{padding:"9px 16px",cursor:"pointer",fontSize:"13px",display:"flex",alignItems:"center",gap:"8px",
-        borderLeft:currentView===v?"2px solid #534AB7":"2px solid transparent",
-        background:currentView===v?"white":"transparent",
-        color:currentView===v?"#333":"#666",fontWeight:currentView===v?500:400,userSelect:"none"},
-      onClick:()=>{ currentView=v; renderShell(); }
-    },
-      h("span",{},navLabels[v]),
-      v==="apis" ? h("span",{style:{fontSize:"10px",background:"#EEEDFE",color:"#534AB7",padding:"2px 6px",borderRadius:"4px",marginLeft:"auto"}},"Admin") : null
-    );
-    return el;
-  });
-
-  const userSelect = h("select",{
-    style:{width:"100%",padding:"5px 8px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"11px",background:"white"},
-    onChange: ev => { currentUser=USERS.find(u=>u.id===parseInt(ev.target.value)); currentView="chat"; renderShell(); }
-  }, ...USERS.map(u=>{ const o=h("option",{value:u.id},u.name); if(u.id===currentUser.id) o.selected=true; return o; }));
-
-  const sidebar = h("div",{style:{background:"#f8f8f7",borderRight:"0.5px solid #e8e8e5",display:"flex",flexDirection:"column",overflow:"hidden"}},
-    h("div",{style:{padding:"14px 16px",borderBottom:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",gap:"10px"}},
-      h("div",{style:{width:"30px",height:"30px",background:TP,borderRadius:"8px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",flexShrink:0}},"🤖"),
-      h("div",null,h("div",{style:{fontSize:"13px",fontWeight:500}},"Bot Manager"),h("div",{style:{fontSize:"10px",color:"#aaa"}},"Altruan KI-System"))
-    ),
-    h("div",{style:{padding:"10px 14px",borderBottom:"0.5px solid #e8e8e5"}},
-      h("div",{style:{fontSize:"10px",color:"#aaa",marginBottom:"5px"}},"Angemeldet als:"),
-      userSelect
-    ),
-    h("div",{style:{flex:1,padding:"6px 0",overflowY:"auto"}},
-      h("div",{style:{fontSize:"10px",fontWeight:500,color:"#aaa",textTransform:"uppercase",letterSpacing:".06em",padding:"8px 16px 4px"}},"Navigation"),
-      ...navEls
-    ),
-    h("div",{style:{padding:"12px 14px",borderTop:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",gap:"8px"}},
-      avatar(currentUser.init,currentUser.bg,currentUser.tc,28),
-      h("div",null,h("div",{style:{fontSize:"12px",fontWeight:500}},currentUser.name),h("div",{style:{fontSize:"10px",color:"#aaa"}},currentUser.role))
-    )
-  );
-
-  // Topbar
-  const topbar = h("div",{style:{padding:"11px 18px",borderBottom:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",justifyContent:"space-between",background:"white",flexShrink:0}},
-    h("div",null,
-      h("div",{style:{fontSize:"15px",fontWeight:500,color:"#333"}},{chat:"💬 Altruan Assistent",dashboard:"📊 Dashboard",customer:"🛍 Kunden-Chat",apis:"🔌 API-Schnittstellen",settings:"⚙️ Einstellungen"}[currentView]),
-      h("div",{style:{fontSize:"11px",color:"#aaa"}},navSubs[currentView])
-    ),
-    h("div",{style:{display:"flex",alignItems:"center",gap:"8px"}},
-      h("div",{style:{width:"8px",height:"8px",borderRadius:"50%",background:"#639922"}}),
-      h("span",{style:{fontSize:"11px",color:"#888"}},"Systeme verbunden")
-    )
-  );
-
-  // Content
-  const content = h("div",{id:"main-content",style:{flex:1,minHeight:0,overflow:"hidden"}});
-
-  const main = h("div",{style:{display:"flex",flexDirection:"column",minWidth:0}}, topbar, content);
-
-  const shell = h("div",{style:{display:"grid",gridTemplateColumns:"200px 1fr",height:"100vh",background:"white"}}, sidebar, main);
-  app.appendChild(shell);
-
-  // Render view
-  if (currentView==="chat") renderChat(content);
-  else if (currentView==="dashboard") renderDashboard(content);
-  else if (currentView==="customer") renderCustomer(content);
-  else if (currentView==="apis") currentUser.admin ? renderAPIs(content) : renderLocked(content);
-  else if (currentView==="settings") renderSettings(content);
-}
-
-// ── Chat ──────────────────────────────────────────────────────────────────────
-function getMessages() { return messages[currentUser.id] || []; }
-function addBotMessage(text, extra={}) {
-  if (!messages[currentUser.id]) messages[currentUser.id] = [];
-  messages[currentUser.id].push({id:uid(), from:"bot", text, time:tnow(), ...extra});
-}
-function addUserMessage(text) {
-  if (!messages[currentUser.id]) messages[currentUser.id] = [];
-  messages[currentUser.id].push({id:uid(), from:"user", text, time:tnow(), userId:currentUser.id});
-}
-
-function renderChat(container) {
-  container.innerHTML = "";
-
-  // Init greeting
-  if (!messages[currentUser.id] || !messages[currentUser.id].length) {
-    setTimeout(() => { addBotMessage(`Hallo ${currentUser.name.split(" ")[0]}! Ich bin der Altruan Assistent. Wie kann ich dir helfen?`); renderChat($("main-content")); }, 300);
-  }
-
-  const syncBar = syncRunning ? h("div",{style:{background:"#E6F1FB",borderBottom:"0.5px solid #B5D4F4",padding:"5px 14px",fontSize:"11px",color:"#0C447C",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}},
-    h("span",null,"🔄 Sync – nächster Zyklus in ",h("strong",null,Math.floor(syncRemaining/60)+":"+String(syncRemaining%60).padStart(2,"0")+" Min")),
-    h("div",{style:{width:"70px",height:"3px",background:"#B5D4F4",borderRadius:"2px",overflow:"hidden"}},
-      h("div",{style:{width:Math.round((600-syncRemaining)/600*100)+"%",height:"100%",background:"#185FA5",transition:"width 1s"}})
-    )
-  ) : null;
-
-  const header = h("div",{style:{padding:"10px 14px",borderBottom:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}},
-    h("div",{style:{display:"flex",alignItems:"center",gap:"10px"}},
-      avatar("AA","#EEEDFE","#534AB7",34,true),
-      h("div",null,
-        h("div",{style:{fontSize:"13px",fontWeight:500}},"Altruan Assistent"),
-        h("div",{style:{fontSize:"11px",color:"#888",display:"flex",alignItems:"center",gap:"4px"}},
-          h("span",{style:{width:"6px",height:"6px",borderRadius:"50%",background:"#639922",display:"inline-block"}}),
-          "Online · KI-Assistent"
-        )
-      )
-    ),
-    h("div",{style:{display:"flex",gap:"6px",alignItems:"center"}},
-      tag("🔒 Privat","#EAF3DE","#3B6D11"),
-      currentUser.admin ? tag("👁 Admin","#FAEEDA","#854F0B") : null
-    )
-  );
-
-  const msgsDiv = h("div",{id:"chat-msgs",style:{flex:1,overflowY:"auto",padding:"14px",display:"flex",flexDirection:"column",gap:"10px"}});
-  renderMessages(msgsDiv);
-
-  const inputEl = h("input",{
-    type:"text", placeholder:"Nachricht schreiben...",
-    style:{flex:1,padding:"8px 14px",borderRadius:"18px",border:"0.5px solid #ccc",fontSize:"13px",background:"#f8f8f7"}
-  });
-  inputEl.addEventListener("keydown", ev => { if(ev.key==="Enter") sendMessage(inputEl.value); inputEl.value=""; });
-
-  const sendBtn = h("button",{
-    style:{width:"34px",height:"34px",borderRadius:"50%",background:TP,border:"none",cursor:"pointer",color:"white",fontSize:"14px",flexShrink:0},
-    onClick:()=>{ sendMessage(inputEl.value); inputEl.value=""; }
-  },"➤");
-
-  const inputRow = h("div",{style:{padding:"10px 14px",borderTop:"0.5px solid #eee",display:"flex",gap:"8px",flexShrink:0}}, inputEl, sendBtn);
-
-  if (syncBar) container.appendChild(syncBar);
-  container.appendChild(header);
-  container.appendChild(msgsDiv);
-  container.appendChild(inputRow);
-  msgsDiv.scrollTop = msgsDiv.scrollHeight;
-  setTimeout(()=>inputEl.focus(),100);
-}
-
-function renderMessages(container) {
-  container.innerHTML = "";
-  container.appendChild(h("div",{style:{textAlign:"center",fontSize:"10px",color:"#aaa"}},new Date().toLocaleDateString("de-DE",{day:"2-digit",month:"long",year:"numeric"})));
-
-  const msgs = getMessages();
-  for (const msg of msgs) {
-    const isMe = msg.from === "user";
-    const mu = isMe ? USERS.find(u=>u.id===msg.userId)||currentUser : null;
-
-    if (msg.form === "ean") {
-      container.appendChild(renderEANForm());
-    } else if (msg.form === "address") {
-      container.appendChild(renderAddrForm());
-    } else if (msg.card) {
-      const row = h("div",{style:{display:"flex",gap:"8px",alignItems:"flex-end"}},
-        avatar("AA","#EEEDFE","#534AB7",26),
-        h("div",{style:{display:"flex",flexDirection:"column",gap:"2px",maxWidth:"88%"}},
-          infoCard(msg.card.color,msg.card.icon,msg.card.title,msg.card.rows),
-          h("div",{style:{fontSize:"10px",color:"#aaa"}},msg.time)
-        )
-      );
-      container.appendChild(row);
-    } else {
-      container.appendChild(chatBubble(msg.text, isMe, mu));
-    }
-  }
-
-  if (typing) container.appendChild(typingBubble());
-  container.scrollTop = container.scrollHeight;
-}
-
-function refreshChat() {
-  const c = $("chat-msgs");
-  if (c) { renderMessages(c); c.scrollTop = c.scrollHeight; }
-}
-
-function renderEANForm() {
-  let e1="", e2="";
-  const IS = {width:"100%",padding:"7px 10px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"12px",fontFamily:"monospace",boxSizing:"border-box",marginBottom:"8px"};
-  const errDiv = h("div",{style:{fontSize:"11px",color:"#A32D2D",marginBottom:"4px",display:"none"}});
-  const inp1 = h("input",{style:IS,placeholder:"EAN-13, z.B. 4006381333931",maxlength:14});
-  const inp2 = h("input",{style:IS,placeholder:"EAN-13, z.B. 4006381445021",maxlength:14});
-  inp1.addEventListener("input",ev=>e1=ev.target.value);
-  inp2.addEventListener("input",ev=>e2=ev.target.value);
-
-  const ok = v => /^\d{8}$|^\d{13}$/.test(v);
-
-  return h("div",{style:{display:"flex",gap:"8px"}},
-    avatar("AA","#EEEDFE","#534AB7",26),
-    h("div",{style:{borderRadius:"11px",overflow:"hidden",border:"1.5px solid #534AB7",maxWidth:"90%"}},
-      h("div",{style:{padding:"9px 12px",background:"#EEEDFE",color:"#3C3489",fontSize:"12px",fontWeight:500}},"🔢 Fehlende EAN – Bestellung P91111"),
-      h("div",{style:{padding:"12px",background:"white"}},
-        h("div",{style:{padding:"7px 10px",background:"#FAEEDA",borderRadius:"7px",borderLeft:"3px solid #EF9F27",marginBottom:"9px",fontSize:"11px",color:"#633806"}},
-          h("strong",{style:{color:"#854F0B"}},"2 Artikel ohne EAN")," – Transfer blockiert"),
-        h("div",{style:{fontSize:"11px",color:"#888",marginBottom:"3px"}},"Artikel 1 – Schreibtischlampe LED Pro (WC-00441)"),
-        inp1,
-        h("div",{style:{fontSize:"11px",color:"#888",marginBottom:"3px"}},"Artikel 2 – USB-C Hub 7-Port (WC-00519)"),
-        inp2, errDiv
-      ),
-      h("div",{style:{padding:"8px 12px",background:"#f8f8f7",display:"flex",gap:"6px",borderTop:"0.5px solid #eee"}},
-        btn("✓ EAN speichern",true,()=>{
-          if(!e1||!e2||!ok(e1)||!ok(e2)){errDiv.textContent="Bitte gültige EAN-8 oder EAN-13 eingeben.";errDiv.style.display="block";return;}
-          submitEAN(e1,e2);
-        },true),
-        btn("Jira-Ticket",false,()=>cancelForm("jira"),true),
-        btn("Abbrechen",false,()=>cancelForm("cancel"),true)
-      )
-    )
-  );
-}
-
-function renderAddrForm() {
-  let fv = {name:"",street:"",plz:"",city:"",land:"Deutschland"};
-  const IS = {width:"100%",padding:"7px 10px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"12px",boxSizing:"border-box"};
-  const errDiv = h("div",{style:{fontSize:"11px",color:"#A32D2D",display:"none"}});
-  const fields = {};
-  const makeField = (label,key,ph) => {
-    const inp = h("input",{style:IS,placeholder:ph});
-    inp.addEventListener("input",ev=>fv[key]=ev.target.value);
-    fields[key] = inp;
-    return h("div",null,h("div",{style:{fontSize:"11px",color:"#888",marginBottom:"3px"}},label),inp);
-  };
-
-  return h("div",{style:{display:"flex",gap:"8px"}},
-    avatar("AA","#EEEDFE","#534AB7",26),
-    h("div",{style:{borderRadius:"11px",overflow:"hidden",border:"1.5px solid #534AB7",maxWidth:"90%"}},
-      h("div",{style:{padding:"9px 12px",background:"#EEEDFE",color:"#3C3489",fontSize:"12px",fontWeight:500}},"📍 Lieferadresse eingeben"),
-      h("div",{style:{padding:"12px",background:"white",display:"flex",flexDirection:"column",gap:"7px"}},
-        makeField("Empfänger / Firma","name","Mustermann GmbH"),
-        makeField("Straße & Nr.","street","Musterstraße 12"),
-        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}},makeField("PLZ","plz","80331"),makeField("Stadt","city","München")),
-        makeField("Land","land","Deutschland"), errDiv
-      ),
-      h("div",{style:{padding:"8px 12px",background:"#f8f8f7",display:"flex",gap:"6px",borderTop:"0.5px solid #eee"}},
-        btn("✓ Bestätigen",true,()=>{
-          if(!fv.name||!fv.street||!fv.plz||!fv.city){errDiv.textContent="Alle Felder ausfüllen.";errDiv.style.display="block";return;}
-          submitAddr(fv);
-        },true),
-        btn("Abbrechen",false,()=>cancelForm("cancel"),true)
-      )
-    )
-  );
-}
-
-function cancelForm(act) {
-  messages[currentUser.id] = (messages[currentUser.id]||[]).filter(m=>!m.form);
-  if (act==="jira") {
-    typing=true; refreshChat();
-    setTimeout(()=>{
-      typing=false;
-      addBotMessage("",{card:{color:{bg:"#FCEBEB",text:"#791F1F",border:"#F09595",strong:"#A32D2D"},icon:"🎫",title:"Jira TK-2044 erstellt",rows:[["Ticket","TK-2044","red"],["Zugewiesen","Stammdaten-Team",""],["Status","Offen","amber"]]}});
-      addBotMessage("Ticket TK-2044 erstellt und Stammdaten-Team zugewiesen.");
-      refreshChat();
-    },1400);
-  } else {
-    addBotMessage("Abgebrochen. Schreib mir wenn du weitere Hilfe benötigst.");
-    refreshChat();
-  }
-}
-
-function submitEAN(e1,e2) {
-  messages[currentUser.id] = (messages[currentUser.id]||[]).filter(m=>!m.form);
-  addUserMessage(`EAN WC-00441: ${e1} · WC-00519: ${e2}`);
-  typing=true; refreshChat();
-  setTimeout(()=>{
-    typing=false;
-    addBotMessage("",{card:{color:{bg:"#EAF3DE",text:"#27500A",border:"#97C459",strong:"#3B6D11"},icon:"✅",title:"Stammdaten gespeichert – Sync OK",rows:[["EAN 1",e1,"green"],["EAN 2",e2,"green"],["Pulpo Transfer","12/12 Positionen","green"]]}});
-    addBotMessage("EAN gespeichert. Bestellung P91111 vollständig in Pulpo übertragen.");
-    refreshChat();
-  },1800);
-}
-
-function submitAddr(addr) {
-  messages[currentUser.id] = (messages[currentUser.id]||[]).filter(m=>!m.form);
-  addUserMessage(`${addr.name}, ${addr.street}, ${addr.plz} ${addr.city}`);
-  typing=true; refreshChat();
-  setTimeout(()=>{
-    typing=false;
-    addBotMessage("",{card:{color:{bg:"#EAF3DE",text:"#27500A",border:"#97C459",strong:"#3B6D11"},icon:"✅",title:"Adresse gespeichert",rows:[["Weclapp","Aktualisiert","green"],["Pulpo","Aktualisiert","green"],["DHL","Informiert","green"]]}});
-    addBotMessage("Adresse korrigiert und DHL informiert.");
-    refreshChat();
-  },1800);
-}
-
-async function sendMessage(text) {
-  text = text.trim();
-  if (!text || typing) return;
-  addUserMessage(text);
-  refreshChat();
-  const t = text.toLowerCase();
-
-  // EAN flow
-  if (t.includes("p91111") || (t.includes("ean")&&t.includes("fehlt")) || (t.includes("nicht")&&t.includes("pulpo"))) {
-    typing=true; refreshChat();
-    await delay(900); typing=false;
-    addBotMessage("",{card:{color:{bg:"#E6F1FB",text:"#0C447C",border:"#85B7EB",strong:"#185FA5"},icon:"🔍",title:"Diagnose – P91111",rows:[["Weclapp","Freigegeben","green"],["Pulpo Transfer","3× Fehlgeschlagen","red"],["Ursache","Fehlende EAN","red"]]}});
-    refreshChat();
-    await delay(400); typing=true; refreshChat();
-    await delay(1000); typing=false;
-    addBotMessage("2 Artikel ohne EAN blockieren den Transfer. Hast du die Nummern?",{form:"ean"});
-    refreshChat(); return;
-  }
-
-  // Address flow
-  if ((t.includes("adresse")&&(t.includes("fehler")||t.includes("falsch")))||t.includes("adressfehler")||t.includes("4821")) {
-    typing=true; refreshChat();
-    await delay(900); typing=false;
-    addBotMessage("Adressfehler erkannt. Bitte gib die vollständige Lieferadresse ein.",{form:"address"});
-    refreshChat(); return;
-  }
-
-  // Sync flow
-  if (t.includes("sync")||t.includes("synchron")) {
-    typing=true; refreshChat();
-    await delay(700); typing=false;
-    if (syncRunning) {
-      addBotMessage(`Sync läuft – nächster Zyklus in ${Math.floor(syncRemaining/60)}:${String(syncRemaining%60).padStart(2,"0")} Min.`);
-      refreshChat(); return;
-    }
-    addBotMessage("Sync-Überwachung gestartet. Ich melde mich nach dem nächsten Zyklus.");
-    syncRunning=true; syncRemaining=30; syncAttempts=0;
-    startSyncTimer();
-    refreshChat(); return;
-  }
-
-  // Claude API
-  typing=true; refreshChat();
-  try {
-    const apiKey = localStorage.getItem("altruan_api_key")||"";
-    const history = getMessages().slice(-12).map(m=>({role:m.from==="user"?"user":"assistant",content:m.text||(m.card?`[${m.card.title}]`:"")})).filter(m=>m.content.trim());
-    history.push({role:"user",content:text});
-    const resp = await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",headers:{"Content-Type":"application/json",...(apiKey?{"x-api-key":apiKey}:{})},
-      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:800,system:SYS_PROMPT,messages:history})
+    // stacked bars per employee
+    var emps=["Tobias Gumtow","Nina Becker","Lars Fischer"];
+    var bars=el("div",{class:"bars"});
+    var maxC=0;
+    var data=emps.map(function(name){
+      var ts=TICKETS.filter(function(t){return t.user===name;});
+      var by={};Object.keys(STATUS_COLORS).forEach(function(s){by[s]=ts.filter(function(t){return t.status===s;}).length;});
+      if(ts.length>maxC)maxC=ts.length;return {name:name,count:ts.length,by:by};
     });
-    const data = await resp.json();
-    typing=false;
-    addBotMessage(data.content?.[0]?.text||"Bitte erneut versuchen.");
-  } catch {
-    typing=false;
-    addBotMessage("Verbindungsfehler. API-Key in Einstellungen prüfen.");
-  }
-  refreshChat();
-}
+    data.forEach(function(d){
+      var stack=el("div",{class:"barstack",style:{height:(d.count/Math.max(maxC,1)*140)+"px"}});
+      Object.keys(STATUS_COLORS).forEach(function(s){
+        if(d.by[s]>0)stack.appendChild(el("div",{style:{height:(d.by[s]/d.count*100)+"%",background:STATUS_COLORS[s].c}}));
+      });
+      bars.appendChild(el("div",{class:"barcol"},stack,el("div",{class:"barname"},d.name.split(" ")[0]),el("div",{style:{fontSize:"11px",fontWeight:"600"}},d.count)));
+    });
+    scroll.appendChild(el("div",{class:"panel"},el("h2",{},"Tickets pro Mitarbeiter"),bars));
 
-function startSyncTimer() {
-  if (syncTimer) clearInterval(syncTimer);
-  syncTimer = setInterval(()=>{
-    syncRemaining--;
-    const bar = $("app")?.querySelector("[data-sync-fill]");
-    if (bar) bar.style.width = Math.round((600-syncRemaining)/600*100)+"%";
-    if (syncRemaining <= 0) {
-      clearInterval(syncTimer); syncTimer=null; syncRunning=false;
-      syncAttempts++;
-      if (syncAttempts >= 2) {
-        addBotMessage("",{card:{color:{bg:"#FCEBEB",text:"#791F1F",border:"#F09595",strong:"#A32D2D"},icon:"🎫",title:"Jira TK-2045 erstellt",rows:[["Ticket","TK-2045","red"],["Priorität","Hoch","red"],["Zugewiesen","DevOps-Team",""],["Status","Offen","amber"]]}});
-        addBotMessage("Jira TK-2045 erstellt und DevOps-Team zugewiesen.");
-      } else {
-        addBotMessage("",{card:{color:{bg:"#EAF3DE",text:"#27500A",border:"#97C459",strong:"#3B6D11"},icon:"✅",title:"Sync erfolgreich",rows:[["Datensätze","47/47","green"],["Dauer","11 Sek",""],["Fehler","0","green"]]}});
-        addBotMessage("Sync erfolgreich. 47 Datensätze übertragen.");
-      }
-      refreshChat();
-    }
-  },1000);
-}
-
-// ── Dashboard ─────────────────────────────────────────────────────────────────
-const TICKETS=[
-  {id:"TK-1042",user:"Lars Becker",subj:"Lieferschein DC9 fehlt in Pulpo",status:"auto",rt:"0.4 Min",date:"Heute 09:12"},
-  {id:"TK-1041",user:"Nina Becker",subj:"Adressfehler Bestellung #4821",status:"auto",rt:"0.7 Min",date:"Heute 08:55"},
-  {id:"TK-1040",user:"Tobias Gumtow",subj:"Bestellung P91111 – EAN fehlt",status:"forwarded",rt:"1.2 Min",date:"Heute 08:33"},
-  {id:"TK-1039",user:"Lars Fischer",subj:"Weclapp Sync fehlgeschlagen",status:"open",rt:"—",date:"Heute 08:20"},
-  {id:"TK-1038",user:"Nina Becker",subj:"DHL-Tracking 1234567890",status:"forwarded",rt:"2.8 Min",date:"Gestern"},
-];
-const EMPS=[
-  {name:"Tobias Gumtow",init:"TG",bg:"#CECBF6",tc:"#3C3489",total:87,auto:61,fwd:19,open:7,rt:"1.2 Min"},
-  {name:"Nina Becker",init:"NB",bg:"#9FE1CB",tc:"#085041",total:74,auto:48,fwd:20,open:6,rt:"0.9 Min"},
-  {name:"Lars Fischer",init:"LF",bg:"#B5D4F4",tc:"#0C447C",total:65,auto:38,fwd:22,open:5,rt:"2.1 Min"},
-  {name:"Jonas Püttmann",init:"JP",bg:"#CECBF6",tc:"#3C3489",total:41,auto:32,fwd:7,open:2,rt:"0.8 Min"},
-];
-
-function renderDashboard(container) {
-  container.innerHTML="";
-  const sP = s=>({auto:{bg:"#EAF3DE",c:"#3B6D11",l:"✓ Auto"},forwarded:{bg:"#EEEDFE",c:"#534AB7",l:"→ Weitergegeben"},open:{bg:"#FAEEDA",c:"#854F0B",l:"○ Offen"}}[s]);
-  const TH={padding:"9px 12px",textAlign:"left",fontSize:"11px",fontWeight:500,color:"#888",borderBottom:"0.5px solid #e8e8e5"};
-  const TD={padding:"9px 12px"};
-  let filterVal="all";
-
-  const wrap = h("div",{style:{padding:"20px",overflowY:"auto",height:"100%"}});
-
-  // KPIs
-  wrap.appendChild(h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"10px",marginBottom:"18px"}},
-    ...[["Tickets",TICKETS.length,"#333"],["Auto-gelöst",TICKETS.filter(t=>t.status==="auto").length,"#3B6D11"],["Weitergegeben",TICKETS.filter(t=>t.status==="forwarded").length,"#534AB7"],["Ø Antwortzeit","1.1 Min","#854F0B"]].map(([l,v,c])=>
-      h("div",{style:{background:"#f8f8f7",borderRadius:"8px",padding:"12px 14px"}},h("div",{style:{fontSize:"22px",fontWeight:500,color:c}},String(v)),h("div",{style:{fontSize:"11px",color:"#888",marginTop:"2px"}},l))
-    )
-  ));
-
-  // Employees table
-  wrap.appendChild(h("div",{style:{fontSize:"13px",fontWeight:500,marginBottom:"10px"}},"Mitarbeiter-Auswertung"));
-  const empTable = h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:"12px"}});
-  empTable.appendChild(h("thead",null,h("tr",{style:{background:"#f8f8f7"}},
-    ...["Mitarbeiter","Gesamt","Verteilung","Auto-%","Ø Response"].map(l=>h("th",{style:TH},l))
-  )));
-  const empTbody = h("tbody",null);
-  for (const emp of EMPS) {
-    const ap = Math.round(emp.auto/emp.total*100);
-    empTbody.appendChild(h("tr",{style:{borderBottom:"0.5px solid #eee"}},
-      h("td",{style:TD},h("div",{style:{display:"flex",alignItems:"center",gap:"8px"}},
-        h("div",{style:{width:"24px",height:"24px",borderRadius:"50%",background:emp.bg,color:emp.tc,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"10px",fontWeight:500}},emp.init),emp.name)),
-      h("td",{style:{...TD,fontWeight:500}},String(emp.total)),
-      h("td",{style:{...TD,width:"150px"}},
-        h("div",{style:{height:"9px",borderRadius:"4px",overflow:"hidden",display:"flex",gap:"1px"}},
-          h("div",{style:{flex:emp.auto,background:"#639922"}}),h("div",{style:{flex:emp.fwd,background:"#534AB7"}}),h("div",{style:{flex:emp.open,background:"#EF9F27"}})),
-        h("div",{style:{fontSize:"10px",color:"#aaa",marginTop:"2px"}},`${emp.auto} auto · ${emp.fwd} fwd`)),
-      h("td",{style:{...TD,fontWeight:500,color:ap>=70?"#3B6D11":"#854F0B"}},ap+"%"),
-      h("td",{style:{...TD,color:"#888"}},emp.rt)
-    ));
-  }
-  empTable.appendChild(empTbody);
-  wrap.appendChild(h("div",{style:{border:"0.5px solid #e8e8e5",borderRadius:"10px",overflow:"hidden",marginBottom:"18px"}},empTable));
-
-  // Filter buttons
-  const filterRow = h("div",{style:{display:"flex",gap:"6px",marginBottom:"12px"}});
-  const renderTicketTable = () => {
-    tBody.innerHTML="";
-    const ft = filterVal==="all" ? TICKETS : TICKETS.filter(t=>t.status===filterVal);
-    for (const t of ft) {
-      const sp=sP(t.status);
-      tBody.appendChild(h("tr",{style:{borderBottom:"0.5px solid #eee"}},
-        h("td",{style:{...TD,fontFamily:"monospace",fontSize:"11px",color:"#888"}},t.id),
-        h("td",{style:TD},t.user),h("td",{style:TD},t.subj),
-        h("td",{style:TD},tag(sp.l,sp.bg,sp.c)),
-        h("td",{style:{...TD,color:"#888"}},t.rt),
-        h("td",{style:{...TD,color:"#aaa",fontSize:"11px"}},t.date)
-      ));
-    }
-  };
-
-  const filterBtns={};
-  for (const [v,l] of [["all","Alle"],["auto","Auto-gelöst"],["forwarded","Weitergegeben"],["open","Offen"]]) {
-    const b = h("button",{style:{fontSize:"12px",padding:"5px 12px",borderRadius:"16px",border:`0.5px solid ${v===filterVal?"#534AB7":"#ccc"}`,background:v===filterVal?"#534AB7":"white",color:v===filterVal?"white":"#666",cursor:"pointer",fontFamily:"inherit"},
-      onClick:()=>{ filterVal=v; Object.entries(filterBtns).forEach(([k,el])=>{ el.style.background=k===v?"#534AB7":"white"; el.style.color=k===v?"white":"#666"; el.style.borderColor=k===v?"#534AB7":"#ccc"; }); renderTicketTable(); }
-    },l);
-    filterBtns[v]=b; filterRow.appendChild(b);
-  }
-  wrap.appendChild(filterRow);
-
-  const tTable = h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:"12px"}});
-  tTable.appendChild(h("thead",null,h("tr",{style:{background:"#f8f8f7"}},
-    ...["ID","Von","Betreff","Status","Response","Datum"].map(l=>h("th",{style:TH},l))
-  )));
-  const tBody = h("tbody",null);
-  tTable.appendChild(tBody);
-  wrap.appendChild(h("div",{style:{border:"0.5px solid #e8e8e5",borderRadius:"10px",overflow:"hidden"}},tTable));
-  renderTicketTable();
-  container.appendChild(wrap);
-}
-
-// ── API Manager ───────────────────────────────────────────────────────────────
-function renderAPIs(container) {
-  container.innerHTML="";
-  const TH={padding:"9px 12px",textAlign:"left",fontSize:"11px",fontWeight:500,color:"#888",borderBottom:"0.5px solid #e8e8e5"};
-  const TD={padding:"10px 12px"};
-  const sC=s=>s==="active"?"#3B6D11":s==="warn"?"#854F0B":"#A32D2D";
-  const sBg=s=>s==="active"?"#EAF3DE":s==="warn"?"#FAEEDA":"#FCEBEB";
-  const sL=s=>s==="active"?"✓ Aktiv":s==="warn"?"⚠ Warnung":"✕ Inaktiv";
-  let search="", showAdd=false, editId=null, form={name:"",cat:"ERP",url:"",key:"",env:"prod"};
-
-  const wrap = h("div",{style:{padding:"20px",overflowY:"auto",height:"100%"}});
-
-  const rerender = () => { renderAPIs(container); };
-
-  // KPIs
-  wrap.appendChild(h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"10px",marginBottom:"16px"}},
-    ...[["Gesamt",apis.length,"#333"],["Aktiv",apis.filter(a=>a.status==="active").length,"#3B6D11"],["Warnung",apis.filter(a=>a.status==="warn").length,"#854F0B"],["Inaktiv",apis.filter(a=>a.status==="inactive").length,"#A32D2D"]].map(([l,v,c])=>
-      h("div",{style:{background:"#f8f8f7",borderRadius:"8px",padding:"12px 14px"}},h("div",{style:{fontSize:"22px",fontWeight:500,color:c}},String(v)),h("div",{style:{fontSize:"11px",color:"#888",marginTop:"2px"}},l))
-    )
-  ));
-
-  const searchInp = h("input",{style:{flex:1,padding:"7px 12px",borderRadius:"8px",border:"0.5px solid #ccc",fontSize:"13px"},placeholder:"Suchen..."});
-  searchInp.addEventListener("input",ev=>{ search=ev.target.value; renderTableRows(); });
-  wrap.appendChild(h("div",{style:{display:"flex",gap:"8px",marginBottom:"14px"}},
-    searchInp,
-    btn("+ API hinzufügen",true,()=>{ showAdd=true; editId=null; form={name:"",cat:"ERP",url:"",key:"",env:"prod"}; rerender(); })
-  ));
-
-  if (showAdd) {
-    const makeInp=(label,key,ph,type="text")=>{
-      const inp=h("input",{type,placeholder:ph,style:{width:"100%",padding:"7px 10px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"12px",boxSizing:"border-box"}});
-      if(form[key]) inp.value=form[key];
-      inp.addEventListener("input",ev=>form[key]=ev.target.value);
-      return h("div",null,h("div",{style:{fontSize:"11px",color:"#888",marginBottom:"4px"}},label,key==="key"&&editId?h("span",{style:{color:"#aaa"}}," (leer = unverändert)"):null),inp);
-    };
-    const catSel=h("select",{style:{width:"100%",padding:"7px 10px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"12px"}},
-      ...["CRM","ERP","WMS","Ticketing","Carrier","Messaging","Shop","Marktplatz"].map(c=>{const o=h("option",{value:c},c);if(c===form.cat)o.selected=true;return o;})
-    );
-    catSel.addEventListener("change",ev=>form.cat=ev.target.value);
-    const envSel=h("select",{style:{width:"100%",padding:"7px 10px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"12px"}},
-      ...([["prod","Produktion"],["stage","Staging"]].map(([v,l])=>{const o=h("option",{value:v},l);if(v===form.env)o.selected=true;return o;}))
-    );
-    envSel.addEventListener("change",ev=>form.env=ev.target.value);
-    wrap.appendChild(h("div",{style:{background:"#f0effc",border:"1px solid #AFA9EC",borderRadius:"10px",padding:"16px",marginBottom:"16px"}},
-      h("div",{style:{fontSize:"13px",fontWeight:500,color:"#3C3489",marginBottom:"12px"}},editId?"Bearbeiten":"Neue Schnittstelle"),
-      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}},
-        makeInp("Name","name","z.B. FedEx"),makeInp("Basis-URL","url","https://api..."),
-        h("div",null,h("div",{style:{fontSize:"11px",color:"#888",marginBottom:"4px"}},"Kategorie"),catSel),
-        h("div",null,h("div",{style:{fontSize:"11px",color:"#888",marginBottom:"4px"}},"Umgebung"),envSel),
-        h("div",{style:{gridColumn:"1/-1"}},makeInp("API-Key","key","sk-...","password"))
-      ),
-      h("div",{style:{display:"flex",gap:"8px",marginTop:"12px"}},
-        btn("✓ Speichern",true,()=>{
-          if(!form.name||!form.key)return;
-          if(editId){apis=apis.map(a=>a.id===editId?{...a,...form}:a);}
-          else{apis=[...apis,{...form,id:Date.now(),status:"active"}];}
-          saveApis(); rerender();
-        }),
-        btn("Abbrechen",false,()=>{ showAdd=false; rerender(); })
-      )
-    ));
-  }
-
-  const tbl=h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:"12px"}});
-  tbl.appendChild(h("thead",null,h("tr",{style:{background:"#f8f8f7"}},
-    ...["System","Kategorie","API-Key","Umgebung","Status",""].map(l=>h("th",{style:TH},l))
-  )));
-  const tBody=h("tbody",null);
-  tbl.appendChild(tBody);
-  wrap.appendChild(h("div",{style:{border:"0.5px solid #e8e8e5",borderRadius:"10px",overflow:"hidden"}},tbl));
-
-  const renderTableRows = () => {
-    tBody.innerHTML="";
-    const filtered=apis.filter(a=>a.name.toLowerCase().includes(search.toLowerCase()));
-    for (const api of filtered) {
-      tBody.appendChild(h("tr",{style:{borderBottom:"0.5px solid #eee"}},
-        h("td",{style:{...TD,fontWeight:500}},api.name),
-        h("td",{style:TD},tag(api.cat,"#f0f0f0","#555")),
-        h("td",{style:{...TD,fontFamily:"monospace",fontSize:"11px",color:"#888"}},api.key),
-        h("td",{style:TD},tag(api.env==="prod"?"Prod":"Stage",api.env==="prod"?"#EAF3DE":"#FAEEDA",api.env==="prod"?"#3B6D11":"#854F0B")),
-        h("td",{style:TD},tag(sL(api.status),sBg(api.status),sC(api.status))),
-        h("td",{style:TD},h("div",{style:{display:"flex",gap:"4px"}},
-          btn("✎",false,()=>{ form={name:api.name,cat:api.cat,url:api.url||"",key:"",env:api.env}; editId=api.id; showAdd=true; rerender(); },true),
-          btn("✕",false,()=>{ apis=apis.filter(a=>a.id!==api.id); saveApis(); rerender(); },true,true)
-        ))
-      ));
-    }
-  };
-  renderTableRows();
-  container.appendChild(wrap);
-}
-
-// ── Customer Chat ─────────────────────────────────────────────────────────────
-function renderCustomer(container) {
-  container.innerHTML="";
-  custStep="select"; custMode=null; custVerified=null; custTicket=null; custMsgs=[];
-  renderCustView(container);
-}
-
-function renderCustView(container) {
-  container.innerHTML="";
-  const IS={width:"100%",padding:"9px 12px",borderRadius:"9px",border:"1.5px solid #e0dfd8",fontSize:"13px",outline:"none",boxSizing:"border-box",marginBottom:"10px"};
-
-  const header=h("div",{style:{background:TP,padding:"10px 14px",display:"flex",alignItems:"center",gap:"10px",flexShrink:0}},
-    h("button",{style:{background:"rgba(255,255,255,.15)",border:"none",borderRadius:"6px",padding:"3px 8px",color:"white",fontSize:"11px",cursor:"pointer"},onClick:()=>{currentView="chat";renderShell();}},"← Zurück"),
-    h("div",{style:{width:"28px",height:"28px",borderRadius:"50%",background:"#EEEDFE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",flexShrink:0}},"🤖"),
-    h("div",{style:{fontSize:"13px",fontWeight:500,color:"white"}},"Altruan Kundenservice")
-  );
-  container.appendChild(header);
-
-  const body=h("div",{style:{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}});
-  container.appendChild(body);
-  container.style.display="flex";
-  container.style.flexDirection="column";
-  container.style.height="100%";
-
-  if (custStep==="select") {
-    body.style.justifyContent="center";body.style.alignItems="center";body.style.padding="24px";
-    body.appendChild(h("div",{style:{fontSize:"22px",marginBottom:"8px"}},"🤖"));
-    body.appendChild(h("div",{style:{fontSize:"16px",fontWeight:500,marginBottom:"20px"}},"Wie können wir helfen?"));
-    const optWrap=h("div",{style:{width:"100%",maxWidth:"300px",display:"flex",flexDirection:"column",gap:"10px"}});
-    for (const [ico,t,d,m,bg] of [["📋","Anfrage Angebot","Angebot anfragen","angebot","#EAF3DE"],["📦","Anfrage Auftrag","Bestehende Bestellung","auftrag","#E6F1FB"]]) {
-      optWrap.appendChild(h("button",{style:{padding:"14px 16px",borderRadius:"11px",border:"1.5px solid #e0dfd8",background:"white",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:"12px",fontFamily:"inherit",fontSize:"inherit"},
-        onClick:()=>{custMode=m;custStep=m==="angebot"?"angebot-form":"verify";renderCustView(container);}},
-        h("div",{style:{width:"34px",height:"34px",borderRadius:"9px",background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"18px"}},ico),
-        h("div",null,h("div",{style:{fontSize:"14px",fontWeight:500}},t),h("div",{style:{fontSize:"12px",color:"#888"}},d)),
-        h("span",{style:{marginLeft:"auto",color:"#ccc"}},"›")
-      ));
-    }
-    body.appendChild(optWrap);
-  }
-  else if (custStep==="angebot-form") {
-    body.style.overflowY="auto";body.style.padding="20px";
-    body.appendChild(h("button",{style:{background:"none",border:"none",cursor:"pointer",color:"#888",fontSize:"13px",marginBottom:"14px",fontFamily:"inherit"},onClick:()=>{custStep="select";renderCustView(container);}},"← Zurück"));
-    body.appendChild(h("div",{style:{fontSize:"15px",fontWeight:500,marginBottom:"16px"}},"📋 Anfrage Angebot"));
-    const af={name:"",email:"",phone:"",artikel:"",menge:""};
-    const errDiv=h("div",{style:{fontSize:"12px",color:"#A32D2D",marginBottom:"10px",display:"none"}});
-    for (const [l,k,p,type] of [["Name","name","Vor- und Nachname","text"],["E-Mail","email","deine@email.de","email"],["Telefon","phone","+49 89 123456","tel"],["Artikel","artikel","Artikelname","text"],["Menge","menge","z.B. 50 Stück","text"]]) {
-      const inp=h("input",{type,placeholder:p,style:{...IS,borderColor:"#e0dfd8"}});
-      inp.addEventListener("input",ev=>af[k]=ev.target.value);
-      body.appendChild(h("div",null,h("div",{style:{fontSize:"12px",color:"#555",marginBottom:"4px",fontWeight:500}},l),inp));
-    }
-    body.appendChild(errDiv);
-    body.appendChild(btn("Anfrage absenden →",true,()=>{
-      if(!af.name||!af.email||!af.phone||!af.artikel||!af.menge){errDiv.textContent="Alle Felder ausfüllen.";errDiv.style.display="block";return;}
-      if(!/\S+@\S+\.\S+/.test(af.email)){errDiv.textContent="Ungültige E-Mail.";errDiv.style.display="block";return;}
-      custTicket={nr:`ANG-${ticketCounter++}`,...af,created:new Date().toLocaleDateString("de-DE")};
-      custStep="ticket-confirm";renderCustView(container);
+    // filter + table
+    var statuses=["alle","gelöst","in Bearbeitung","offen","eskaliert"];
+    var fb=el("div",{class:"filterbar"},statuses.map(function(s){
+      return el("button",{class:"fbtn"+(filter===s?" on":""),onClick:function(){filter=s;build();}},s.charAt(0).toUpperCase()+s.slice(1));
     }));
+    var rows=TICKETS.filter(function(t){return filter==="alle"||t.status===filter;});
+    var table=el("table",{},
+      el("thead",{},el("tr",{},el("th",{},"Ticket"),el("th",{},"Mitarbeiter"),el("th",{},"Kategorie"),el("th",{},"Status"))),
+      el("tbody",{},rows.map(function(t){
+        var sc=STATUS_COLORS[t.status];
+        return el("tr",{},el("td",{class:"mono"},t.nr),el("td",{},t.user),el("td",{},t.cat),
+          el("td",{},el("span",{class:"pill",style:{background:sc.bg,color:sc.c}},t.status)));
+      }))
+    );
+    scroll.appendChild(el("div",{class:"panel"},el("h2",{},"Ticket-Übersicht"),fb,table));
   }
-  else if (custStep==="verify") {
-    body.style.overflowY="auto";body.style.padding="20px";
-    body.appendChild(h("button",{style:{background:"none",border:"none",cursor:"pointer",color:"#888",fontSize:"13px",marginBottom:"14px",fontFamily:"inherit"},onClick:()=>{custStep="select";renderCustView(container);}},"← Zurück"));
-    body.appendChild(h("div",{style:{fontSize:"15px",fontWeight:500,marginBottom:"16px"}},"📦 Anfrage Auftrag"));
-    const vf={order:"",email:""};
-    const errDiv=h("div",{style:{fontSize:"12px",color:"#A32D2D",marginBottom:"8px",display:"none"}});
-    const oinp=h("input",{placeholder:"z.B. ORD-10042",style:{...IS,fontFamily:"monospace"}});
-    oinp.addEventListener("input",ev=>vf.order=ev.target.value);
-    const einp=h("input",{type:"email",placeholder:"deine@email.de",style:IS});
-    einp.addEventListener("input",ev=>vf.email=ev.target.value);
-    const vbtn=btn("Weiter →",true,()=>{
-      errDiv.style.display="none";
-      const key=vf.order.trim().toUpperCase();const em=vf.email.trim().toLowerCase();
-      const found=MOCK_ORDERS[key];
-      if(!found){errDiv.textContent="Bestellnummer nicht gefunden.";errDiv.style.display="block";return;}
-      if(found.email.toLowerCase()!==em){errDiv.textContent="E-Mail stimmt nicht überein.";errDiv.style.display="block";return;}
-      vbtn.textContent="Wird geprüft…";vbtn.disabled=true;
-      setTimeout(()=>{custVerified={orderNr:key,...found};custStep="chat";renderCustView(container);},1000);
+  build();
+  return scroll;
+}
+
+/* ---------- CUSTOMER CHAT ---------- */
+function viewCustomer(){
+  var cust={step:"select",mode:null,ticket:null,verified:null,msgs:[]};
+  var wrap=el("div",{class:"chatwrap"});
+
+  function rebuild(){
+    clear(wrap);
+    if(cust.step==="select"){
+      wrap.appendChild(el("div",{class:"select-card"},
+        el("div",{class:"opt",onClick:function(){cust.mode="angebot";cust.step="angebot";rebuild();}},
+          el("div",{class:"ic"},"📝"),el("div",{class:"t"},"Angebot anfragen"),el("div",{class:"d"},"Neue Anfrage / Angebot anfordern")),
+        el("div",{class:"opt",onClick:function(){cust.mode="auftrag";cust.step="verify";rebuild();}},
+          el("div",{class:"ic"},"📦"),el("div",{class:"t"},"Auftrag / Bestellung"),el("div",{class:"d"},"Status zu bestehender Bestellung")) 
+      ));
+      return;
+    }
+    if(cust.step==="angebot"){
+      var f=el("div",{class:"card",style:{margin:"30px auto"}},el("h3",{},"📝 Angebotsanfrage"));
+      function fld(l,id){return el("div",{class:"field"},el("label",{},l),el("input",{id:id}));}
+      f.appendChild(fld("Name","c_name"));f.appendChild(fld("E-Mail","c_mail"));f.appendChild(fld("Produkt / Bedarf","c_prod"));
+      f.appendChild(el("button",{class:"pri",onClick:function(){
+        var name=f.querySelector("#c_name").value||"Kunde";
+        cust.ticket={nr:"ANF-"+Math.floor(1000+Math.random()*9000),name:name};
+        cust.step="chat";cust.msgs=[];rebuild();
+      }},"Anfrage senden"));
+      wrap.appendChild(el("div",{style:{flex:"1",overflow:"auto"}},f));
+      return;
+    }
+    if(cust.step==="verify"){
+      var vf=el("div",{class:"card",style:{margin:"30px auto"}},el("h3",{},"🔎 Bestellung suchen"));
+      vf.appendChild(el("div",{class:"field"},el("label",{},"Bestellnummer"),el("input",{id:"v_nr",placeholder:"z.B. AB-2042"})));
+      vf.appendChild(el("div",{class:"field"},el("label",{},"E-Mail oder PLZ"),el("input",{id:"v_id"})));
+      vf.appendChild(el("button",{class:"pri",onClick:function(){
+        var nr=vf.querySelector("#v_nr").value||"AB-0000";
+        cust.verified={orderNr:nr,name:"Kunde"};cust.step="chat";cust.msgs=[];rebuild();
+      }},"Suchen"));
+      wrap.appendChild(el("div",{style:{flex:"1",overflow:"auto"}},vf));
+      return;
+    }
+    // chat step
+    var box=el("div",{class:"msgs"});
+    if(cust.msgs.length===0){
+      var greet=cust.mode==="angebot"&&cust.ticket
+        ? "Hallo! Ihre Anfrage "+cust.ticket.nr+" wurde erfasst – ein Mitarbeiter erstellt Ihnen zeitnah ein Angebot. Haben Sie noch Fragen?"
+        : cust.verified ? "Hallo! Bestellung "+cust.verified.orderNr+" gefunden. Wie kann ich helfen?"
+        : "Hallo! Wie kann ich helfen?";
+      cust.msgs.push({from:"bot",text:greet,time:now()});
+    }
+    function paintC(){clear(box);cust.msgs.forEach(function(m){
+      var av=m.from==="bot"?el("div",{class:"logo",style:{width:"30px",height:"30px",fontSize:"15px"}},"🤖"):el("div",{class:"av",style:{width:"30px",height:"30px",background:"#EEF2F7",color:"#5A6B82",fontSize:"11px"}},"DU");
+      box.appendChild(el("div",{class:"row "+(m.from==="bot"?"bot":"me")},av,el("div",{},el("div",{class:"bubble"},m.text),el("div",{class:"time"},m.time))));
+    });box.scrollTop=box.scrollHeight;}
+    paintC();
+    var cwrap=el("div",{class:"chatwrap"},box);
+    var ta=el("textarea",{rows:"1",placeholder:"Ihre Nachricht…"});
+    var sb=el("button",{class:"send"},"Senden");
+    function sc(){
+      var v=ta.value.trim();if(!v)return;cust.msgs.push({from:"me",text:v,time:now()});ta.value="";paintC();
+      var t=el("div",{class:"row bot"},el("div",{class:"logo",style:{width:"30px",height:"30px",fontSize:"15px"}},"🤖"),el("div",{class:"typing"},el("span"),el("span"),el("span")));
+      box.appendChild(t);box.scrollTop=box.scrollHeight;sb.disabled=true;
+      var hist=cust.msgs.map(function(m){return {role:m.from==="me"?"user":"assistant",content:m.text};});
+      callClaude(hist,CUST_SYSTEM,function(reply,err){
+        sb.disabled=false;if(t.parentNode)box.removeChild(t);
+        if(err==="NO_KEY")cust.msgs.push({from:"bot",text:"⚠️ Bitte API-Key in den Einstellungen hinterlegen.",time:now()});
+        else if(err)cust.msgs.push({from:"bot",text:"⚠️ "+err,time:now()});
+        else cust.msgs.push({from:"bot",text:reply,time:now()});
+        paintC();
+      });
+    }
+    sb.addEventListener("click",sc);
+    ta.addEventListener("keydown",function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sc();}});
+    cwrap.appendChild(el("div",{class:"inputbar"},
+      el("button",{class:"sec",onClick:function(){cust.step="select";cust.mode=null;cust.verified=null;cust.ticket=null;cust.msgs=[];rebuild();}},"↩"),
+      ta,sb));
+    wrap.appendChild(cwrap);
+  }
+  rebuild();
+  return wrap;
+}
+
+/* ---------- API MANAGER ---------- */
+function viewApis(){
+  var apis=getApis();
+  var scroll=el("div",{class:"scroll"});
+  function build(){
+    clear(scroll);
+    scroll.appendChild(el("button",{class:"pri",style:{marginBottom:"14px"},onClick:function(){editor(null);}},"+ Schnittstelle hinzufügen"));
+    apis.forEach(function(a){
+      scroll.appendChild(el("div",{class:"api-card"},
+        el("div",{style:{width:"34px",height:"34px",borderRadius:"8px",background:"#f0eefb",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"15px"}},"🔌"),
+        el("div",{style:{flex:"1",minWidth:"0"}},
+          el("div",{class:"nm"},a.name,el("span",{class:"cat",style:{marginLeft:"8px"}},a.cat)),
+          el("div",{class:"ur"},a.url)),
+        el("button",{class:"sec",style:{padding:"5px 10px"},onClick:function(){editor(a);}},"Bearbeiten"),
+        el("button",{class:"sec",style:{padding:"5px 10px",color:"#C53A3A"},onClick:function(){
+          apis=apis.filter(function(x){return x.id!==a.id;});saveApis(apis);build();
+        }},"Löschen")
+      ));
     });
-    body.appendChild(h("div",null,h("div",{style:{fontSize:"12px",color:"#555",marginBottom:"4px",fontWeight:500}},"Bestellnummer"),oinp));
-    body.appendChild(h("div",null,h("div",{style:{fontSize:"12px",color:"#555",marginBottom:"4px",fontWeight:500}},"E-Mail"),einp));
-    body.appendChild(errDiv);body.appendChild(vbtn);
-    body.appendChild(h("div",{style:{marginTop:"12px",background:"#f8f8f7",borderRadius:"8px",padding:"9px 11px",fontSize:"11px",color:"#888"}},h("strong",{style:{color:"#666"}},"Test: "),"ORD-10042 · jonas.puettmann@altruan.de"));
   }
-  else if (custStep==="ticket-confirm") {
-    body.style.justifyContent="center";body.style.alignItems="center";body.style.padding="20px";
-    body.appendChild(h("div",{style:{fontSize:"28px",marginBottom:"8px"}},"✅"));
-    body.appendChild(h("div",{style:{fontSize:"16px",fontWeight:500,marginBottom:"6px"}},"Anfrage eingegangen!"));
-    body.appendChild(h("div",{style:{fontSize:"13px",color:"#888",textAlign:"center",marginBottom:"18px",lineHeight:1.6}},"Unser Team meldet sich innerhalb 1 Werktag."));
-    const card=h("div",{style:{width:"100%",maxWidth:"290px",background:"#f8f8f7",borderRadius:"10px",overflow:"hidden",border:"0.5px solid #e8e8e5",marginBottom:"16px"}});
-    card.appendChild(h("div",{style:{background:TP,padding:"8px 13px",fontSize:"12px",fontWeight:500,color:"#EEEDFE",display:"flex",justifyContent:"space-between"}},h("span",null,"Ticket"),h("span",null,custTicket.nr)));
-    for (const [k,v] of [["Name",custTicket.name],["Artikel",custTicket.artikel],["Menge",custTicket.menge],["Telefon",custTicket.phone]]) {
-      card.appendChild(h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:"12px",padding:"6px 13px",borderBottom:"0.5px solid #eee"}},h("span",{style:{color:"#888"}},k),h("span",{style:{fontWeight:500}},v)));
-    }
-    body.appendChild(card);
-    body.appendChild(btn("Weitere Fragen →",true,()=>{custMsgs=[];custStep="chat";renderCustView(container);}));
+  function editor(a){
+    var isNew=!a;a=a||{id:"a"+uid(),name:"",cat:"",url:""};
+    clear(scroll);
+    var f=el("div",{class:"setbox"},el("h2",{},isNew?"Neue Schnittstelle":"Schnittstelle bearbeiten"));
+    function fld(l,id,v){var i=el("input",{id:id,value:v||""});return {row:el("div",{class:"field"},el("label",{},l),i),input:i};}
+    var n=fld("Name","e_name",a.name),c=fld("Kategorie","e_cat",a.cat),u=fld("API-URL","e_url",a.url);
+    f.appendChild(n.row);f.appendChild(c.row);f.appendChild(u.row);
+    f.appendChild(el("div",{style:{display:"flex",gap:"8px",marginTop:"6px"}},
+      el("button",{class:"pri",onClick:function(){
+        a.name=n.input.value;a.cat=c.input.value;a.url=u.input.value;
+        if(isNew)apis.push(a);saveApis(apis);build();
+      }},"Speichern"),
+      el("button",{class:"sec",onClick:build},"Abbrechen")
+    ));
+    scroll.appendChild(f);
   }
-  else if (custStep==="chat") {
-    if (!custMsgs.length) {
-      const g=custMode==="angebot"&&custTicket?`Hallo ${custTicket.name.split(" ")[0]}! Ticket ${custTicket.nr} erfasst.`:custVerified?`Hallo ${custVerified.name.split(" ")[0]}! Bestellung ${custVerified.orderNr} gefunden.`:"Hallo!";
-      setTimeout(()=>{custMsgs.push({id:uid(),from:"bot",text:g,time:tnow()});renderCustMsgs();},400);
-    }
-    const msgsDiv=h("div",{id:"cust-msgs",style:{flex:1,overflowY:"auto",padding:"14px",display:"flex",flexDirection:"column",gap:"8px"}});
-    const custInput=h("input",{placeholder:"Deine Frage...",style:{flex:1,padding:"8px 13px",borderRadius:"18px",border:"1px solid #e0dfd8",fontSize:"13px",background:"#f8f8f7"}});
-
-    const sendCust=async()=>{
-      const text=custInput.value.trim();if(!text)return;custInput.value="";
-      custMsgs.push({id:uid(),from:"user",text,time:tnow()});
-      renderCustMsgs();
-      const typDiv=typingBubble();msgsDiv.appendChild(typDiv);msgsDiv.scrollTop=msgsDiv.scrollHeight;
-      try {
-        const apiKey=localStorage.getItem("altruan_api_key")||"";
-        const ctx=custVerified?`\nKunde: ${custVerified.name}\nBestellung: ${custVerified.orderNr}\nStatus: ${custVerified.status}\nTracking: ${custVerified.tracking}`:custTicket?`\nTicket: ${custTicket.nr}\nArtikel: ${custTicket.artikel}`:"";
-        const hist=custMsgs.slice(-10).map(m=>({role:m.from==="user"?"user":"assistant",content:m.text||""})).filter(m=>m.content.trim());
-        hist.push({role:"user",content:text});
-        const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json",...(apiKey?{"x-api-key":apiKey}:{})},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:600,system:CUST_PROMPT+ctx,messages:hist})});
-        const data=await resp.json();
-        typDiv.remove();
-        custMsgs.push({id:uid(),from:"bot",text:data.content?.[0]?.text||"Bitte erneut.",time:tnow()});
-      } catch {typDiv.remove();custMsgs.push({id:uid(),from:"bot",text:"Verbindungsfehler.",time:tnow()});}
-      renderCustMsgs();
-    };
-
-    custInput.addEventListener("keydown",ev=>{if(ev.key==="Enter")sendCust();});
-    const sb=h("button",{style:{width:"32px",height:"32px",borderRadius:"50%",background:TP,border:"none",cursor:"pointer",color:"white",fontSize:"13px",flexShrink:0},onClick:sendCust},"➤");
-
-    body.appendChild(msgsDiv);
-    body.appendChild(h("div",{style:{padding:"10px 14px",borderTop:"0.5px solid #eee",display:"flex",gap:"8px",flexShrink:0}},custInput,sb));
-
-    function renderCustMsgs() {
-      msgsDiv.innerHTML="";
-      for (const m of custMsgs) {
-        const isMe=m.from==="user";
-        msgsDiv.appendChild(h("div",{style:{display:"flex",gap:"7px",alignItems:"flex-end",flexDirection:isMe?"row-reverse":"row"}},
-          !isMe?h("div",{style:{width:"24px",height:"24px",borderRadius:"50%",background:"#EEEDFE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"12px",flexShrink:0}},"🤖"):null,
-          h("div",{style:{borderRadius:"11px",padding:"8px 12px",fontSize:"13px",lineHeight:1.5,maxWidth:"78%",...(isMe?{background:TP,color:"white",borderBottomRightRadius:"3px"}:{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderBottomLeftRadius:"3px",color:"#222"})}},m.text)
-        ));
-      }
-      msgsDiv.scrollTop=msgsDiv.scrollHeight;
-    }
-    renderCustMsgs();
-  }
+  build();
+  return scroll;
 }
 
-// ── Settings ──────────────────────────────────────────────────────────────────
-function renderSettings(container) {
-  container.innerHTML="";
-  const wrap=h("div",{style:{padding:"24px",maxWidth:"540px"}});
-  wrap.appendChild(h("div",{style:{fontSize:"15px",fontWeight:500,marginBottom:"4px"}},"Einstellungen"));
-  wrap.appendChild(h("div",{style:{fontSize:"12px",color:"#888",marginBottom:"20px"}},"Bot-Konfiguration"));
-
-  const keyInp=h("input",{type:"password",placeholder:"sk-ant-...",style:{width:"100%",padding:"8px 12px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"13px",fontFamily:"monospace",boxSizing:"border-box",marginBottom:"10px"}});
-  keyInp.value=localStorage.getItem("altruan_api_key")||"";
-  const savedMsg=h("span",{style:{fontSize:"12px",color:"#3B6D11",marginLeft:"10px",display:"none"}},"✓ Gespeichert");
-  wrap.appendChild(h("div",{style:{background:"white",border:"0.5px solid #e8e8e5",borderRadius:"10px",padding:"16px",marginBottom:"14px"}},
-    h("div",{style:{fontSize:"13px",fontWeight:500,marginBottom:"4px"}},"Anthropic API-Key"),
-    h("div",{style:{fontSize:"12px",color:"#888",marginBottom:"10px",lineHeight:1.5}},"Erhältlich unter ",h("a",{href:"https://console.anthropic.com",target:"_blank",rel:"noreferrer",style:{color:"#534AB7"}},"console.anthropic.com"),". Wird nur lokal gespeichert."),
-    keyInp,
-    h("div",{style:{display:"flex",alignItems:"center"}},
-      btn("Speichern",true,()=>{localStorage.setItem("altruan_api_key",keyInp.value);savedMsg.style.display="inline";setTimeout(()=>savedMsg.style.display="none",2000);}),
-      savedMsg
-    )
+/* ---------- SETTINGS ---------- */
+function viewSettings(){
+  var scroll=el("div",{class:"scroll"});
+  var key=getKey();
+  var inp=el("input",{type:"password",value:key,placeholder:"sk-ant-..."});
+  var saveBtn=el("button",{class:"pri"},"Speichern");
+  saveBtn.addEventListener("click",function(){store.set("altruan_api_key",inp.value.trim());saveBtn.textContent="✓ Gespeichert";setTimeout(function(){saveBtn.textContent="Speichern";},2000);});
+  scroll.appendChild(el("div",{class:"setbox"},
+    el("h2",{},"Anthropic API-Key"),
+    el("p",{},"Erhältlich unter console.anthropic.com. Der Key wird nur lokal in deinem Browser gespeichert und nie an Dritte übertragen – der Chat läuft damit sofort mit echter KI."),
+    inp,saveBtn
   ));
-  wrap.appendChild(h("div",{style:{background:"#f8f8f7",border:"0.5px solid #e8e8e5",borderRadius:"10px",padding:"16px"}},
-    h("div",{style:{fontSize:"13px",fontWeight:500,marginBottom:"10px"}},"System-Info"),
-    ...[["Version","1.0.0"],["Modell","claude-sonnet-4-6"],["Sync Lieferungen","alle 3 Min"],["Sync Bestellungen","alle 20 Min"],["Sync Produkte","alle 60 Min"],["Jira-Eskalation","nach 2 Fehlversuchen"]].map(([k,v])=>
-      h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:"12px",padding:"4px 0",borderBottom:"0.5px solid #eee"}},h("span",{style:{color:"#888"}},k),h("span",{style:{fontWeight:500}},v))
-    )
-  ));
-  container.appendChild(wrap);
+  var info=el("div",{class:"setbox"},el("h2",{style:{marginBottom:"10px"}},"System-Info"));
+  [["Version","1.0.0"],["Modell","claude-sonnet-4-6"],["Hosting","GitHub Pages"],
+   ["Sync – Lieferungen → Pulpo","alle 3 Min"],["Sync – Lieferanten-Bestellungen","alle 20 Min"],
+   ["Sync – Produkte","alle 60 Min"],["Jira-Eskalation","nach 2 Fehlversuchen"]].forEach(function(r){
+    info.appendChild(el("div",{class:"info-row"},el("span",{},r[0]),el("span",{},r[1])));
+  });
+  scroll.appendChild(info);
+  return scroll;
 }
 
-function renderLocked(container) {
-  container.innerHTML="";
-  container.appendChild(h("div",{style:{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",flexDirection:"column",gap:"8px",color:"#aaa"}},
-    h("span",{style:{fontSize:"32px"}},"🔒"),
-    h("span",{style:{fontSize:"14px"}},"Admin-Berechtigung erforderlich")
-  ));
-}
+/* ---------- boot ---------- */
+render();
 
-// ── Boot ──────────────────────────────────────────────────────────────────────
-document.addEventListener("DOMContentLoaded", renderShell);
+})();
 </script>
 </body>
 </html>
