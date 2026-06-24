@@ -4,23 +4,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Altruan Bot Manager</title>
-<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
-body{background:#f0efeb;height:100vh;overflow:hidden}
+body{background:#f0efeb}
 @keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}
-input,select,button{font-family:inherit}
+input,select,button{font-family:inherit;outline:none}
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#ddd;border-radius:2px}
 </style>
 </head>
 <body>
-<div id="root" style="height:100vh"></div>
+<div id="app"></div>
 <script>
-const e = React.createElement;
-const {useState, useEffect, useRef, useCallback} = React;
-
+// ── Pure vanilla JS – no framework needed ────────────────────────────────────
 const TP = "#464775";
+
 const USERS = [
   {id:1,init:"TG",name:"Tobias Gumtow",role:"Leiter Logistik",admin:false,bg:"#CECBF6",tc:"#3C3489"},
   {id:2,init:"NB",name:"Nina Becker",role:"Sachbearbeiterin",admin:false,bg:"#9FE1CB",tc:"#085041"},
@@ -47,299 +44,462 @@ const MOCK_ORDERS = {
   "TEST-0001":{email:"test@test.de",name:"Test Kunde",items:"Testartikel × 1",status:"Versandt",carrier:"DHL",tracking:"9876543210",eta:"Übermorgen"},
 };
 
-const SYS = `Du bist der Altruan Assistent – KI-Logistik-Assistent. Antworte auf Deutsch, präzise, freundlich.
+const SYS_PROMPT = `Du bist der Altruan Assistent – KI-Logistik-Assistent der Firma Altruan. Antworte auf Deutsch, präzise, freundlich.
 Systeme: Weclapp (ERP), Pulpo WMS, Jira, Zendesk, Salesforce, DHL, DB Schenker, Shopify, Miracle, Teams.
 Sync: Lieferungen 3 Min · Bestellungen 20 Min · Produkte 60 Min. Nach 2 Sync-Fehlern → Jira-Ticket.
-Bei Adressfehlern: vollständige Adresse anfordern. Kurz und direkt antworten.`;
+Bei Adressfehlern: vollständige Adresse anfordern (Name, Straße, PLZ, Stadt, Land). Kurz und direkt antworten.`;
+
+const CUST_PROMPT = `Du bist der Altruan Kunden-Assistent. Antworte auf Deutsch, freundlich und empathisch. Hilf bei Bestellfragen, Tracking und Rücksendungen.`;
+
+let currentUser = USERS[0];
+let currentView = "chat";
+let messages = {}; // userId -> array
+let apis = JSON.parse(localStorage.getItem("altruan_apis") || "null") || DEFAULT_APIS;
+let syncTimer = null, syncRemaining = 600, syncRunning = false, syncAttempts = 0;
+let typing = false;
+let custStep = "select", custMode = null, custVerified = null, custTicket = null;
+let custMsgs = [];
+let ticketCounter = 1001;
 
 const tnow = () => { const d=new Date(); return d.getHours()+":"+String(d.getMinutes()).padStart(2,"0"); };
 const uid = () => Date.now()+Math.random();
-const delay = ms => new Promise(r => setTimeout(r, ms));
+const delay = ms => new Promise(r=>setTimeout(r,ms));
+const $ = id => document.getElementById(id);
+const saveApis = () => localStorage.setItem("altruan_apis", JSON.stringify(apis));
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-function s(...args) {
-  let out = {};
-  for (const a of args) if (a) Object.assign(out, a);
-  return out;
+// ── Render helpers ────────────────────────────────────────────────────────────
+function h(tag, attrs={}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs)) {
+    if (k === "style" && typeof v === "object") Object.assign(el.style, v);
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2).toLowerCase(), v);
+    else el.setAttribute(k, v);
+  }
+  for (const c of children.flat()) {
+    if (c == null || c === false) continue;
+    el.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+  }
+  return el;
 }
 
-const Av = ({init,bg,tc,size=32,online=false}) =>
-  e("div",{style:{position:"relative",flexShrink:0}},
-    e("div",{style:{width:size,height:size,borderRadius:"50%",background:bg,color:tc,display:"flex",alignItems:"center",justifyContent:"center",fontSize:Math.round(size*.34),fontWeight:500}},init),
-    online && e("div",{style:{width:9,height:9,borderRadius:"50%",background:"#639922",position:"absolute",bottom:0,right:0,border:"2px solid white"}})
+function btn(label, primary, onClick, small, danger) {
+  return h("button", {
+    style:{fontSize:small?11:13,padding:small?"4px 10px":"8px 16px",borderRadius:7,border:`1px solid ${primary?"#534AB7":danger?"#E24B4A":"#ccc"}`,background:primary?"#534AB7":danger?"#FCEBEB":"white",color:primary?"#EEEDFE":danger?"#A32D2D":"#444",cursor:"pointer",display:"inline-flex",alignItems:"center",gap:5},
+    onClick
+  }, label);
+}
+
+function avatar(init, bg, tc, size=32, online=false) {
+  const wrap = h("div",{style:{position:"relative",flexShrink:0}},
+    h("div",{style:{width:size+"px",height:size+"px",borderRadius:"50%",background:bg,color:tc,display:"flex",alignItems:"center",justifyContent:"center",fontSize:Math.round(size*.34)+"px",fontWeight:500}},init)
   );
+  if (online) wrap.appendChild(h("div",{style:{width:"9px",height:"9px",borderRadius:"50%",background:"#639922",position:"absolute",bottom:0,right:0,border:"2px solid white"}}));
+  return wrap;
+}
 
-const Btn = ({children,primary,danger,onClick,small,disabled}) =>
-  e("button",{onClick,disabled,style:{fontSize:small?11:12,padding:small?"4px 10px":"7px 14px",borderRadius:7,border:`0.5px solid ${primary?"#534AB7":danger?"#E24B4A":"#ccc"}`,background:primary?"#534AB7":danger?"#FCEBEB":"white",color:primary?"#EEEDFE":danger?"#A32D2D":"#444",cursor:disabled?"default":"pointer",opacity:disabled?.5:1,display:"inline-flex",alignItems:"center",gap:5}},children);
+function tag(text, bg, color) {
+  return h("span",{style:{fontSize:"10px",padding:"2px 7px",borderRadius:"4px",background:bg,color,fontWeight:500}},text);
+}
 
-const Tag = ({children,bg,color}) =>
-  e("span",{style:{fontSize:10,padding:"2px 7px",borderRadius:4,background:bg,color,fontWeight:500}},children);
-
-function InfoCard({color,icon,title,rows}) {
-  return e("div",{style:{borderRadius:10,overflow:"hidden",border:`0.5px solid ${color.border}`,borderLeft:`3px solid ${color.strong}`,maxWidth:"88%",background:"white"}},
-    e("div",{style:{padding:"8px 12px",background:color.bg,color:color.text,fontSize:12,fontWeight:500}},icon+" "+title),
-    e("div",{style:{background:"#f8f8f7",padding:"7px 12px"}},
-      rows.map((r,i) =>
-        e("div",{key:i,style:{display:"flex",justifyContent:"space-between",fontSize:11,padding:"3px 0",borderBottom:i<rows.length-1?"0.5px solid #eee":"none"}},
-          e("span",{style:{color:"#888"}},r[0]),
-          e("span",{style:{fontWeight:500,color:r[2]==="red"?"#A32D2D":r[2]==="green"?"#3B6D11":r[2]==="amber"?"#854F0B":"#333"}},r[1])
-        )
-      )
+function infoCard(col, icon, title, rows) {
+  return h("div",{style:{borderRadius:"10px",overflow:"hidden",border:`0.5px solid ${col.border}`,borderLeft:`3px solid ${col.strong}`,maxWidth:"88%",background:"white"}},
+    h("div",{style:{padding:"8px 12px",background:col.bg,color:col.text,fontSize:"12px",fontWeight:500}}, icon+" "+title),
+    h("div",{style:{background:"#f8f8f7",padding:"7px 12px"}},
+      ...rows.map((r,i)=>h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:"11px",padding:"3px 0",borderBottom:i<rows.length-1?"0.5px solid #eee":"none"}},
+        h("span",{style:{color:"#888"}},r[0]),
+        h("span",{style:{fontWeight:500,color:r[2]==="red"?"#A32D2D":r[2]==="green"?"#3B6D11":r[2]==="amber"?"#854F0B":"#333"}},r[1])
+      ))
     )
   );
 }
 
-const TypingBubble = () =>
-  e("div",{style:{display:"flex",gap:8,alignItems:"flex-end"}},
-    e(Av,{init:"AA",bg:"#EEEDFE",tc:"#534AB7",size:26}),
-    e("div",{style:{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderRadius:11,borderBottomLeftRadius:3,padding:"9px 12px",display:"flex",gap:4}},
-      [0,150,300].map(d=>e("div",{key:d,style:{width:5,height:5,borderRadius:"50%",background:"#aaa",animation:`bounce .9s ${d}ms infinite`}}))
+function typingBubble() {
+  return h("div",{style:{display:"flex",gap:"8px",alignItems:"flex-end"}},
+    avatar("AA","#EEEDFE","#534AB7",26),
+    h("div",{style:{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderRadius:"11px",borderBottomLeftRadius:"3px",padding:"9px 12px",display:"flex",gap:"4px"}},
+      ...[0,150,300].map(d=>{const dot=h("div",{style:{width:"5px",height:"5px",borderRadius:"50%",background:"#aaa",animation:`bounce .9s ${d}ms infinite`}}); return dot;})
     )
   );
+}
+
+function chatBubble(text, isMe, userObj) {
+  const av = isMe ? avatar(userObj?.init||"?",userObj?.bg||"#eee",userObj?.tc||"#333",26) : avatar("AA","#EEEDFE","#534AB7",26);
+  const bubble = h("div",{style:{borderRadius:"11px",padding:"9px 13px",fontSize:"13px",lineHeight:1.5,
+    ...(isMe?{background:TP,color:"white",borderBottomRightRadius:"3px"}:{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderBottomLeftRadius:"3px",color:"#222"})
+  }}, text);
+  return h("div",{style:{display:"flex",gap:"8px",alignItems:"flex-end",flexDirection:isMe?"row-reverse":"row"}},
+    av, h("div",{style:{display:"flex",flexDirection:"column",gap:"2px",maxWidth:"80%",alignItems:isMe?"flex-end":"flex-start"}}, bubble)
+  );
+}
+
+// ── App Shell ─────────────────────────────────────────────────────────────────
+function renderShell() {
+  const app = $("app");
+  app.innerHTML = "";
+
+  const nav = ["chat","dashboard","customer","apis","settings"];
+  const navLabels = {chat:"💬 Chat",dashboard:"📊 Dashboard",customer:"🛍 Kunden-Chat",apis:"🔌 API-Schnittstellen",settings:"⚙️ Einstellungen"};
+  const navSubs = {chat:"Privater Chat",dashboard:"Ticket-Übersicht",customer:"Kunden-Portal",apis:"Schnittstellen",settings:"Konfiguration"};
+
+  // Sidebar
+  const sidebarNavItems = nav.filter(v => v!=="apis" || currentUser.admin);
+  const navEls = sidebarNavItems.map(v => {
+    const el = h("div",{
+      style:{padding:"9px 16px",cursor:"pointer",fontSize:"13px",display:"flex",alignItems:"center",gap:"8px",
+        borderLeft:currentView===v?"2px solid #534AB7":"2px solid transparent",
+        background:currentView===v?"white":"transparent",
+        color:currentView===v?"#333":"#666",fontWeight:currentView===v?500:400,userSelect:"none"},
+      onClick:()=>{ currentView=v; renderShell(); }
+    },
+      h("span",{},navLabels[v]),
+      v==="apis" ? h("span",{style:{fontSize:"10px",background:"#EEEDFE",color:"#534AB7",padding:"2px 6px",borderRadius:"4px",marginLeft:"auto"}},"Admin") : null
+    );
+    return el;
+  });
+
+  const userSelect = h("select",{
+    style:{width:"100%",padding:"5px 8px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"11px",background:"white"},
+    onChange: ev => { currentUser=USERS.find(u=>u.id===parseInt(ev.target.value)); currentView="chat"; renderShell(); }
+  }, ...USERS.map(u=>{ const o=h("option",{value:u.id},u.name); if(u.id===currentUser.id) o.selected=true; return o; }));
+
+  const sidebar = h("div",{style:{background:"#f8f8f7",borderRight:"0.5px solid #e8e8e5",display:"flex",flexDirection:"column",overflow:"hidden"}},
+    h("div",{style:{padding:"14px 16px",borderBottom:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",gap:"10px"}},
+      h("div",{style:{width:"30px",height:"30px",background:TP,borderRadius:"8px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",flexShrink:0}},"🤖"),
+      h("div",null,h("div",{style:{fontSize:"13px",fontWeight:500}},"Bot Manager"),h("div",{style:{fontSize:"10px",color:"#aaa"}},"Altruan KI-System"))
+    ),
+    h("div",{style:{padding:"10px 14px",borderBottom:"0.5px solid #e8e8e5"}},
+      h("div",{style:{fontSize:"10px",color:"#aaa",marginBottom:"5px"}},"Angemeldet als:"),
+      userSelect
+    ),
+    h("div",{style:{flex:1,padding:"6px 0",overflowY:"auto"}},
+      h("div",{style:{fontSize:"10px",fontWeight:500,color:"#aaa",textTransform:"uppercase",letterSpacing:".06em",padding:"8px 16px 4px"}},"Navigation"),
+      ...navEls
+    ),
+    h("div",{style:{padding:"12px 14px",borderTop:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",gap:"8px"}},
+      avatar(currentUser.init,currentUser.bg,currentUser.tc,28),
+      h("div",null,h("div",{style:{fontSize:"12px",fontWeight:500}},currentUser.name),h("div",{style:{fontSize:"10px",color:"#aaa"}},currentUser.role))
+    )
+  );
+
+  // Topbar
+  const topbar = h("div",{style:{padding:"11px 18px",borderBottom:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",justifyContent:"space-between",background:"white",flexShrink:0}},
+    h("div",null,
+      h("div",{style:{fontSize:"15px",fontWeight:500,color:"#333"}},{chat:"💬 Altruan Assistent",dashboard:"📊 Dashboard",customer:"🛍 Kunden-Chat",apis:"🔌 API-Schnittstellen",settings:"⚙️ Einstellungen"}[currentView]),
+      h("div",{style:{fontSize:"11px",color:"#aaa"}},navSubs[currentView])
+    ),
+    h("div",{style:{display:"flex",alignItems:"center",gap:"8px"}},
+      h("div",{style:{width:"8px",height:"8px",borderRadius:"50%",background:"#639922"}}),
+      h("span",{style:{fontSize:"11px",color:"#888"}},"Systeme verbunden")
+    )
+  );
+
+  // Content
+  const content = h("div",{id:"main-content",style:{flex:1,minHeight:0,overflow:"hidden"}});
+
+  const main = h("div",{style:{display:"flex",flexDirection:"column",minWidth:0}}, topbar, content);
+
+  const shell = h("div",{style:{display:"grid",gridTemplateColumns:"200px 1fr",height:"100vh",background:"white"}}, sidebar, main);
+  app.appendChild(shell);
+
+  // Render view
+  if (currentView==="chat") renderChat(content);
+  else if (currentView==="dashboard") renderDashboard(content);
+  else if (currentView==="customer") renderCustomer(content);
+  else if (currentView==="apis") currentUser.admin ? renderAPIs(content) : renderLocked(content);
+  else if (currentView==="settings") renderSettings(content);
+}
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
-function ChatView({currentUser,allUsers,isAdmin}) {
-  const [messages,setMessages] = useState({});
-  const [typing,setTyping] = useState(false);
-  const [input,setInput] = useState("");
-  const [activeUser,setActiveUser] = useState(allUsers.find(u=>!u.admin)||allUsers[0]);
-  const [syncState,setSyncState] = useState({running:false,remaining:600,attempts:0});
-  const syncRef = useRef(null);
-  const bottomRef = useRef(null);
-  const uid2 = isAdmin ? activeUser?.id : currentUser.id;
+function getMessages() { return messages[currentUser.id] || []; }
+function addBotMessage(text, extra={}) {
+  if (!messages[currentUser.id]) messages[currentUser.id] = [];
+  messages[currentUser.id].push({id:uid(), from:"bot", text, time:tnow(), ...extra});
+}
+function addUserMessage(text) {
+  if (!messages[currentUser.id]) messages[currentUser.id] = [];
+  messages[currentUser.id].push({id:uid(), from:"user", text, time:tnow(), userId:currentUser.id});
+}
 
-  const getMsgs = useCallback(id => messages[id]||[], [messages]);
-  const addMsg = useCallback((msg, id) =>
-    setMessages(p => ({...p, [id||uid2]: [...(p[id||uid2]||[]), msg]}))
-  , [uid2]);
+function renderChat(container) {
+  container.innerHTML = "";
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({behavior:"smooth"}); }, [messages,typing,activeUser]);
+  // Init greeting
+  if (!messages[currentUser.id] || !messages[currentUser.id].length) {
+    setTimeout(() => { addBotMessage(`Hallo ${currentUser.name.split(" ")[0]}! Ich bin der Altruan Assistent. Wie kann ich dir helfen?`); renderChat($("main-content")); }, 300);
+  }
 
-  useEffect(() => {
-    const id = currentUser.id;
-    if (!messages[id] || !messages[id].length) {
-      setTimeout(() => addMsg({id:uid(),from:"bot",text:`Hallo ${currentUser.name.split(" ")[0]}! Ich bin der Altruan Assistent. Wie kann ich dir helfen?`,time:tnow()}, id), 500);
-    }
-  }, [currentUser.id]); // eslint-disable-line
+  const syncBar = syncRunning ? h("div",{style:{background:"#E6F1FB",borderBottom:"0.5px solid #B5D4F4",padding:"5px 14px",fontSize:"11px",color:"#0C447C",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}},
+    h("span",null,"🔄 Sync – nächster Zyklus in ",h("strong",null,Math.floor(syncRemaining/60)+":"+String(syncRemaining%60).padStart(2,"0")+" Min")),
+    h("div",{style:{width:"70px",height:"3px",background:"#B5D4F4",borderRadius:"2px",overflow:"hidden"}},
+      h("div",{style:{width:Math.round((600-syncRemaining)/600*100)+"%",height:"100%",background:"#185FA5",transition:"width 1s"}})
+    )
+  ) : null;
 
-  useEffect(() => {
-    if (!syncState.running) return;
-    if (syncRef.current) clearInterval(syncRef.current);
-    syncRef.current = setInterval(() => {
-      setSyncState(prev => {
-        if (prev.remaining <= 1) {
-          clearInterval(syncRef.current);
-          const att = prev.attempts + 1;
-          const cid = uid2;
-          setTimeout(() => {
-            if (att >= 2) {
-              addMsg({id:uid(),from:"bot",time:tnow(),card:{color:{bg:"#FCEBEB",text:"#791F1F",border:"#F09595",strong:"#A32D2D"},icon:"🎫",title:"Jira TK-2045 erstellt",rows:[["Ticket","TK-2045","red"],["Priorität","Hoch","red"],["Zugewiesen","DevOps-Team",""],["Status","Offen","amber"]]}}, cid);
-              addMsg({id:uid(),from:"bot",text:"Jira TK-2045 erstellt und DevOps-Team zugewiesen.",time:tnow()}, cid);
-            } else {
-              addMsg({id:uid(),from:"bot",time:tnow(),card:{color:{bg:"#EAF3DE",text:"#27500A",border:"#97C459",strong:"#3B6D11"},icon:"✅",title:"Sync erfolgreich",rows:[["Datensätze","47 / 47","green"],["Dauer","11 Sek",""],["Fehler","0","green"]]}}, cid);
-              addMsg({id:uid(),from:"bot",text:"Sync erfolgreich. Alle 47 Datensätze übertragen.",time:tnow()}, cid);
-            }
-          }, 600);
-          return {...prev, running:false, remaining:600, attempts:att};
-        }
-        return {...prev, remaining:prev.remaining-1};
-      });
-    }, 1000);
-    return () => clearInterval(syncRef.current);
-  }, [syncState.running]); // eslint-disable-line
-
-  const resolveEAN = (e1, e2) => {
-    setMessages(p => ({...p, [uid2]: (p[uid2]||[]).filter(m => !m.form)}));
-    addMsg({id:uid(),from:"user",text:`EAN WC-00441: ${e1} · WC-00519: ${e2}`,time:tnow(),userId:currentUser.id}, uid2);
-    setTyping(true);
-    setTimeout(() => {
-      setTyping(false);
-      addMsg({id:uid(),from:"bot",time:tnow(),card:{color:{bg:"#EAF3DE",text:"#27500A",border:"#97C459",strong:"#3B6D11"},icon:"✅",title:"Stammdaten gespeichert – Sync OK",rows:[["EAN 1",e1,"green"],["EAN 2",e2,"green"],["Pulpo Transfer","12/12 Positionen","green"]]}}, uid2);
-      addMsg({id:uid(),from:"bot",text:"EAN gespeichert. Bestellung P91111 vollständig in Pulpo übertragen.",time:tnow()}, uid2);
-    }, 1800);
-  };
-
-  const cancelForm = (act) => {
-    setMessages(p => ({...p, [uid2]: (p[uid2]||[]).filter(m => !m.form)}));
-    if (act === "jira") {
-      setTyping(true);
-      setTimeout(() => {
-        setTyping(false);
-        addMsg({id:uid(),from:"bot",time:tnow(),card:{color:{bg:"#FCEBEB",text:"#791F1F",border:"#F09595",strong:"#A32D2D"},icon:"🎫",title:"Jira TK-2044 erstellt",rows:[["Ticket","TK-2044","red"],["Zugewiesen","Stammdaten-Team",""],["Status","Offen","amber"]]}}, uid2);
-      }, 1400);
-    } else {
-      addMsg({id:uid(),from:"bot",text:"Abgebrochen.",time:tnow()}, uid2);
-    }
-  };
-
-  const resolveAddr = (addr) => {
-    setMessages(p => ({...p, [uid2]: (p[uid2]||[]).filter(m => !m.form)}));
-    addMsg({id:uid(),from:"user",text:`${addr.name}, ${addr.street}, ${addr.plz} ${addr.city}`,time:tnow(),userId:currentUser.id}, uid2);
-    setTyping(true);
-    setTimeout(() => {
-      setTyping(false);
-      addMsg({id:uid(),from:"bot",time:tnow(),card:{color:{bg:"#EAF3DE",text:"#27500A",border:"#97C459",strong:"#3B6D11"},icon:"✅",title:"Adresse gespeichert",rows:[["Weclapp","Aktualisiert","green"],["Pulpo","Aktualisiert","green"],["DHL","Informiert","green"]]}}, uid2);
-      addMsg({id:uid(),from:"bot",text:"Adresse korrigiert und DHL informiert.",time:tnow()}, uid2);
-    }, 1800);
-  };
-
-  const handleInput = async (text, history) => {
-    const t = text.toLowerCase();
-    if (t.includes("p91111") || (t.includes("ean") && t.includes("fehlt")) || (t.includes("nicht") && t.includes("pulpo"))) {
-      setTyping(true); await delay(900); setTyping(false);
-      addMsg({id:uid(),from:"bot",time:tnow(),card:{color:{bg:"#E6F1FB",text:"#0C447C",border:"#85B7EB",strong:"#185FA5"},icon:"🔍",title:"Diagnose – P91111",rows:[["Weclapp","Freigegeben","green"],["Pulpo Transfer","3× Fehlgeschlagen","red"],["Ursache","Fehlende EAN","red"]]}}, uid2);
-      await delay(400); setTyping(true); await delay(1000); setTyping(false);
-      addMsg({id:uid(),from:"bot",text:"2 Artikel ohne EAN blockieren den Transfer. Hast du die Nummern?",time:tnow(),form:"ean"}, uid2);
-      return;
-    }
-    if ((t.includes("adresse") && (t.includes("fehler")||t.includes("falsch"))) || t.includes("adressfehler") || t.includes("4821")) {
-      setTyping(true); await delay(900); setTyping(false);
-      addMsg({id:uid(),from:"bot",text:"Adressfehler erkannt. Bitte gib die vollständige Lieferadresse ein.",time:tnow(),form:"address"}, uid2);
-      return;
-    }
-    if (t.includes("sync") || t.includes("synchron")) {
-      setTyping(true); await delay(700); setTyping(false);
-      if (syncState.running) {
-        addMsg({id:uid(),from:"bot",text:`Sync läuft – nächster Zyklus in ${Math.floor(syncState.remaining/60)}:${String(syncState.remaining%60).padStart(2,"0")} Min.`,time:tnow()}, uid2);
-        return;
-      }
-      addMsg({id:uid(),from:"bot",text:"Sync-Überwachung gestartet. Ich melde mich nach dem nächsten Zyklus.",time:tnow()}, uid2);
-      setSyncState(p => ({...p, running:true, remaining:30}));
-      return;
-    }
-    setTyping(true);
-    try {
-      const apiKey = localStorage.getItem("altruan_api_key") || "";
-      const msgs = [
-        ...history.slice(-12).map(m => ({role:m.from==="user"?"user":"assistant",content:m.text||(m.card?`[${m.card.title}]`:"")})).filter(m=>m.content.trim()),
-        {role:"user",content:text}
-      ];
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST",
-        headers:{"Content-Type":"application/json", ...(apiKey?{"x-api-key":apiKey}:{})},
-        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:800,system:SYS,messages:msgs})
-      });
-      const data = await resp.json();
-      setTyping(false);
-      addMsg({id:uid(),from:"bot",text:data.content?.[0]?.text||"Bitte erneut versuchen.",time:tnow()}, uid2);
-    } catch {
-      setTyping(false);
-      addMsg({id:uid(),from:"bot",text:"Verbindungsfehler. API-Key in Einstellungen prüfen.",time:tnow()}, uid2);
-    }
-  };
-
-  const send = async () => {
-    const text = input.trim();
-    if (!text || typing) return;
-    setInput("");
-    const history = getMsgs(uid2);
-    addMsg({id:uid(),from:"user",text,time:tnow(),userId:currentUser.id}, uid2);
-    await handleInput(text, history);
-  };
-
-  const chatMsgs = getMsgs(uid2);
-  const sm = Math.floor(syncState.remaining/60);
-  const ss = String(syncState.remaining%60).padStart(2,"0");
-
-  return e("div",{style:{display:"flex",flexDirection:"column",height:"100%"}},
-    syncState.running && e("div",{style:{background:"#E6F1FB",borderBottom:"0.5px solid #B5D4F4",padding:"5px 14px",fontSize:11,color:"#0C447C",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}},
-      e("span",null,"🔄 Sync – nächster Zyklus in ",e("strong",null,`${sm}:${ss}`)),
-      e("div",{style:{width:70,height:3,background:"#B5D4F4",borderRadius:2,overflow:"hidden"}},
-        e("div",{style:{width:`${Math.round((600-syncState.remaining)/600*100)}%`,height:"100%",background:"#185FA5",transition:"width 1s"}})
-      )
-    ),
-    e("div",{style:{padding:"10px 14px",borderBottom:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}},
-      e("div",{style:{display:"flex",alignItems:"center",gap:10}},
-        e(Av,{init:"AA",bg:"#EEEDFE",tc:"#534AB7",size:34,online:true}),
-        e("div",null,
-          e("div",{style:{fontSize:13,fontWeight:500}},"Altruan Assistent"),
-          e("div",{style:{fontSize:11,color:"#888",display:"flex",alignItems:"center",gap:4}},
-            e("span",{style:{width:6,height:6,borderRadius:"50%",background:"#639922",display:"inline-block"}}),
-            "Online · KI-Assistent",
-            isAdmin && activeUser && e("span",{style:{marginLeft:6,color:"#534AB7"}},`→ ${activeUser.name}`)
-          )
+  const header = h("div",{style:{padding:"10px 14px",borderBottom:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}},
+    h("div",{style:{display:"flex",alignItems:"center",gap:"10px"}},
+      avatar("AA","#EEEDFE","#534AB7",34,true),
+      h("div",null,
+        h("div",{style:{fontSize:"13px",fontWeight:500}},"Altruan Assistent"),
+        h("div",{style:{fontSize:"11px",color:"#888",display:"flex",alignItems:"center",gap:"4px"}},
+          h("span",{style:{width:"6px",height:"6px",borderRadius:"50%",background:"#639922",display:"inline-block"}}),
+          "Online · KI-Assistent"
         )
-      ),
-      e("div",{style:{display:"flex",gap:6,alignItems:"center"}},
-        isAdmin && e("select",{onChange:ev=>{const u=allUsers.find(x=>x.id===parseInt(ev.target.value));if(u)setActiveUser(u);},value:activeUser?.id,style:{fontSize:11,padding:"4px 7px",borderRadius:6,border:"0.5px solid #ccc",background:"white"}},
-          allUsers.filter(u=>!u.admin).map(u=>e("option",{key:u.id,value:u.id},u.name))
-        ),
-        e(Tag,{bg:"#EAF3DE",color:"#3B6D11"},"🔒 Privat"),
-        isAdmin && e(Tag,{bg:"#FAEEDA",color:"#854F0B"},"👁 Admin")
       )
     ),
-    e("div",{style:{flex:1,overflowY:"auto",padding:14,display:"flex",flexDirection:"column",gap:10}},
-      e("div",{style:{textAlign:"center",fontSize:10,color:"#aaa"}},new Date().toLocaleDateString("de-DE",{day:"2-digit",month:"long",year:"numeric"})),
-      chatMsgs.map(msg => {
-        const isMe = msg.from === "user";
-        const mu = isMe ? (allUsers.find(u=>u.id===msg.userId)||currentUser) : null;
-        if (msg.form === "ean") return e("div",{key:msg.id,style:{display:"flex",gap:8}}, e(Av,{init:"AA",bg:"#EEEDFE",tc:"#534AB7",size:26}), e(EANFormC,{onSubmit:resolveEAN,onCancel:cancelForm}));
-        if (msg.form === "address") return e("div",{key:msg.id,style:{display:"flex",gap:8}}, e(Av,{init:"AA",bg:"#EEEDFE",tc:"#534AB7",size:26}), e(AddrFormC,{onSubmit:resolveAddr,onCancel:()=>{setMessages(p=>({...p,[uid2]:(p[uid2]||[]).filter(m=>!m.form)}));addMsg({id:uid(),from:"bot",text:"Abgebrochen.",time:tnow()},uid2);}}));
-        return e("div",{key:msg.id,style:{display:"flex",gap:8,alignItems:"flex-end",flexDirection:isMe?"row-reverse":"row"}},
-          isMe ? e(Av,{init:mu?.init||"?",bg:mu?.bg||"#eee",tc:mu?.tc||"#333",size:26}) : e(Av,{init:"AA",bg:"#EEEDFE",tc:"#534AB7",size:26}),
-          e("div",{style:{display:"flex",flexDirection:"column",gap:2,maxWidth:"80%",alignItems:isMe?"flex-end":"flex-start"}},
-            msg.card ? e(InfoCard,{...msg.card}) :
-              e("div",{style:{borderRadius:11,padding:"9px 13px",fontSize:13,lineHeight:1.5,...(isMe?{background:TP,color:"white",borderBottomRightRadius:3}:{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderBottomLeftRadius:3,color:"#222"})}},msg.text),
-            e("div",{style:{fontSize:10,color:"#aaa"}},msg.time)
-          )
-        );
-      }),
-      typing && e(TypingBubble,null),
-      e("div",{ref:bottomRef})
-    ),
-    e("div",{style:{padding:"10px 14px",borderTop:"0.5px solid #eee",display:"flex",gap:8,flexShrink:0}},
-      e("input",{value:input,onChange:ev=>setInput(ev.target.value),onKeyDown:ev=>ev.key==="Enter"&&send(),placeholder:"Nachricht schreiben...",style:{flex:1,padding:"8px 14px",borderRadius:18,border:"0.5px solid #ccc",fontSize:13,outline:"none",background:"#f8f8f7"}}),
-      e("button",{onClick:send,style:{width:34,height:34,borderRadius:"50%",background:TP,border:"none",cursor:"pointer",color:"white",fontSize:14,flexShrink:0}},"➤")
+    h("div",{style:{display:"flex",gap:"6px",alignItems:"center"}},
+      tag("🔒 Privat","#EAF3DE","#3B6D11"),
+      currentUser.admin ? tag("👁 Admin","#FAEEDA","#854F0B") : null
     )
   );
+
+  const msgsDiv = h("div",{id:"chat-msgs",style:{flex:1,overflowY:"auto",padding:"14px",display:"flex",flexDirection:"column",gap:"10px"}});
+  renderMessages(msgsDiv);
+
+  const inputEl = h("input",{
+    type:"text", placeholder:"Nachricht schreiben...",
+    style:{flex:1,padding:"8px 14px",borderRadius:"18px",border:"0.5px solid #ccc",fontSize:"13px",background:"#f8f8f7"}
+  });
+  inputEl.addEventListener("keydown", ev => { if(ev.key==="Enter") sendMessage(inputEl.value); inputEl.value=""; });
+
+  const sendBtn = h("button",{
+    style:{width:"34px",height:"34px",borderRadius:"50%",background:TP,border:"none",cursor:"pointer",color:"white",fontSize:"14px",flexShrink:0},
+    onClick:()=>{ sendMessage(inputEl.value); inputEl.value=""; }
+  },"➤");
+
+  const inputRow = h("div",{style:{padding:"10px 14px",borderTop:"0.5px solid #eee",display:"flex",gap:"8px",flexShrink:0}}, inputEl, sendBtn);
+
+  if (syncBar) container.appendChild(syncBar);
+  container.appendChild(header);
+  container.appendChild(msgsDiv);
+  container.appendChild(inputRow);
+  msgsDiv.scrollTop = msgsDiv.scrollHeight;
+  setTimeout(()=>inputEl.focus(),100);
 }
 
-function EANFormC({onSubmit,onCancel}) {
-  const [e1,setE1] = useState(""); const [e2,setE2] = useState(""); const [err,setErr] = useState("");
+function renderMessages(container) {
+  container.innerHTML = "";
+  container.appendChild(h("div",{style:{textAlign:"center",fontSize:"10px",color:"#aaa"}},new Date().toLocaleDateString("de-DE",{day:"2-digit",month:"long",year:"numeric"})));
+
+  const msgs = getMessages();
+  for (const msg of msgs) {
+    const isMe = msg.from === "user";
+    const mu = isMe ? USERS.find(u=>u.id===msg.userId)||currentUser : null;
+
+    if (msg.form === "ean") {
+      container.appendChild(renderEANForm());
+    } else if (msg.form === "address") {
+      container.appendChild(renderAddrForm());
+    } else if (msg.card) {
+      const row = h("div",{style:{display:"flex",gap:"8px",alignItems:"flex-end"}},
+        avatar("AA","#EEEDFE","#534AB7",26),
+        h("div",{style:{display:"flex",flexDirection:"column",gap:"2px",maxWidth:"88%"}},
+          infoCard(msg.card.color,msg.card.icon,msg.card.title,msg.card.rows),
+          h("div",{style:{fontSize:"10px",color:"#aaa"}},msg.time)
+        )
+      );
+      container.appendChild(row);
+    } else {
+      container.appendChild(chatBubble(msg.text, isMe, mu));
+    }
+  }
+
+  if (typing) container.appendChild(typingBubble());
+  container.scrollTop = container.scrollHeight;
+}
+
+function refreshChat() {
+  const c = $("chat-msgs");
+  if (c) { renderMessages(c); c.scrollTop = c.scrollHeight; }
+}
+
+function renderEANForm() {
+  let e1="", e2="";
+  const IS = {width:"100%",padding:"7px 10px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"12px",fontFamily:"monospace",boxSizing:"border-box",marginBottom:"8px"};
+  const errDiv = h("div",{style:{fontSize:"11px",color:"#A32D2D",marginBottom:"4px",display:"none"}});
+  const inp1 = h("input",{style:IS,placeholder:"EAN-13, z.B. 4006381333931",maxlength:14});
+  const inp2 = h("input",{style:IS,placeholder:"EAN-13, z.B. 4006381445021",maxlength:14});
+  inp1.addEventListener("input",ev=>e1=ev.target.value);
+  inp2.addEventListener("input",ev=>e2=ev.target.value);
+
   const ok = v => /^\d{8}$|^\d{13}$/.test(v);
-  const IS = {width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #ccc",fontSize:12,fontFamily:"monospace",boxSizing:"border-box",marginBottom:8};
-  return e("div",{style:{borderRadius:11,overflow:"hidden",border:"1.5px solid #534AB7",maxWidth:"90%"}},
-    e("div",{style:{padding:"9px 12px",background:"#EEEDFE",color:"#3C3489",fontSize:12,fontWeight:500}},"🔢 Fehlende EAN – Bestellung P91111"),
-    e("div",{style:{padding:12,background:"white"}},
-      e("div",{style:{padding:"7px 10px",background:"#FAEEDA",borderRadius:7,borderLeft:"3px solid #EF9F27",marginBottom:9,fontSize:11,color:"#633806"}},e("strong",{style:{color:"#854F0B"}},"2 Artikel ohne EAN")," – Transfer blockiert"),
-      e("div",{style:{fontSize:11,color:"#888",marginBottom:3}},"Artikel 1 – Schreibtischlampe LED Pro (WC-00441)"),
-      e("input",{value:e1,onChange:ev=>setE1(ev.target.value),placeholder:"EAN-13, z.B. 4006381333931",maxLength:14,style:IS}),
-      e("div",{style:{fontSize:11,color:"#888",marginBottom:3}},"Artikel 2 – USB-C Hub 7-Port (WC-00519)"),
-      e("input",{value:e2,onChange:ev=>setE2(ev.target.value),placeholder:"EAN-13, z.B. 4006381445021",maxLength:14,style:{...IS,marginBottom:err?6:0}}),
-      err && e("div",{style:{fontSize:11,color:"#A32D2D",marginBottom:4}},err)
-    ),
-    e("div",{style:{padding:"8px 12px",background:"#f8f8f7",display:"flex",gap:6,borderTop:"0.5px solid #eee"}},
-      e(Btn,{primary:true,small:true,onClick:()=>{if(!e1||!e2||!ok(e1)||!ok(e2)){setErr("Bitte gültige EAN-8 oder EAN-13 eingeben.");return;}onSubmit(e1,e2);}},"✓ EAN speichern"),
-      e(Btn,{small:true,onClick:()=>onCancel("jira")},"Jira-Ticket"),
-      e(Btn,{small:true,onClick:()=>onCancel("cancel")},"Abbrechen")
+
+  return h("div",{style:{display:"flex",gap:"8px"}},
+    avatar("AA","#EEEDFE","#534AB7",26),
+    h("div",{style:{borderRadius:"11px",overflow:"hidden",border:"1.5px solid #534AB7",maxWidth:"90%"}},
+      h("div",{style:{padding:"9px 12px",background:"#EEEDFE",color:"#3C3489",fontSize:"12px",fontWeight:500}},"🔢 Fehlende EAN – Bestellung P91111"),
+      h("div",{style:{padding:"12px",background:"white"}},
+        h("div",{style:{padding:"7px 10px",background:"#FAEEDA",borderRadius:"7px",borderLeft:"3px solid #EF9F27",marginBottom:"9px",fontSize:"11px",color:"#633806"}},
+          h("strong",{style:{color:"#854F0B"}},"2 Artikel ohne EAN")," – Transfer blockiert"),
+        h("div",{style:{fontSize:"11px",color:"#888",marginBottom:"3px"}},"Artikel 1 – Schreibtischlampe LED Pro (WC-00441)"),
+        inp1,
+        h("div",{style:{fontSize:"11px",color:"#888",marginBottom:"3px"}},"Artikel 2 – USB-C Hub 7-Port (WC-00519)"),
+        inp2, errDiv
+      ),
+      h("div",{style:{padding:"8px 12px",background:"#f8f8f7",display:"flex",gap:"6px",borderTop:"0.5px solid #eee"}},
+        btn("✓ EAN speichern",true,()=>{
+          if(!e1||!e2||!ok(e1)||!ok(e2)){errDiv.textContent="Bitte gültige EAN-8 oder EAN-13 eingeben.";errDiv.style.display="block";return;}
+          submitEAN(e1,e2);
+        },true),
+        btn("Jira-Ticket",false,()=>cancelForm("jira"),true),
+        btn("Abbrechen",false,()=>cancelForm("cancel"),true)
+      )
     )
   );
 }
 
-function AddrFormC({onSubmit,onCancel}) {
-  const [f,setF] = useState({name:"",street:"",plz:"",city:"",land:"Deutschland"}); const [err,setErr] = useState("");
-  const IS = {width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #ccc",fontSize:12,boxSizing:"border-box"};
-  const field = (label,key,ph) => e("div",{key},
-    e("div",{style:{fontSize:11,color:"#888",marginBottom:3}},label),
-    e("input",{value:f[key],onChange:ev=>setF(p=>({...p,[key]:ev.target.value})),placeholder:ph,style:IS})
-  );
-  return e("div",{style:{borderRadius:11,overflow:"hidden",border:"1.5px solid #534AB7",maxWidth:"90%"}},
-    e("div",{style:{padding:"9px 12px",background:"#EEEDFE",color:"#3C3489",fontSize:12,fontWeight:500}},"📍 Lieferadresse eingeben"),
-    e("div",{style:{padding:12,background:"white",display:"flex",flexDirection:"column",gap:7}},
-      field("Empfänger / Firma","name","Mustermann GmbH"),
-      field("Straße & Nr.","street","Musterstraße 12"),
-      e("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
-        e("div",null,e("div",{style:{fontSize:11,color:"#888",marginBottom:3}},"PLZ"),e("input",{value:f.plz,onChange:ev=>setF(p=>({...p,plz:ev.target.value})),placeholder:"80331",maxLength:5,style:IS})),
-        e("div",null,e("div",{style:{fontSize:11,color:"#888",marginBottom:3}},"Stadt"),e("input",{value:f.city,onChange:ev=>setF(p=>({...p,city:ev.target.value})),placeholder:"München",style:IS}))
+function renderAddrForm() {
+  let fv = {name:"",street:"",plz:"",city:"",land:"Deutschland"};
+  const IS = {width:"100%",padding:"7px 10px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"12px",boxSizing:"border-box"};
+  const errDiv = h("div",{style:{fontSize:"11px",color:"#A32D2D",display:"none"}});
+  const fields = {};
+  const makeField = (label,key,ph) => {
+    const inp = h("input",{style:IS,placeholder:ph});
+    inp.addEventListener("input",ev=>fv[key]=ev.target.value);
+    fields[key] = inp;
+    return h("div",null,h("div",{style:{fontSize:"11px",color:"#888",marginBottom:"3px"}},label),inp);
+  };
+
+  return h("div",{style:{display:"flex",gap:"8px"}},
+    avatar("AA","#EEEDFE","#534AB7",26),
+    h("div",{style:{borderRadius:"11px",overflow:"hidden",border:"1.5px solid #534AB7",maxWidth:"90%"}},
+      h("div",{style:{padding:"9px 12px",background:"#EEEDFE",color:"#3C3489",fontSize:"12px",fontWeight:500}},"📍 Lieferadresse eingeben"),
+      h("div",{style:{padding:"12px",background:"white",display:"flex",flexDirection:"column",gap:"7px"}},
+        makeField("Empfänger / Firma","name","Mustermann GmbH"),
+        makeField("Straße & Nr.","street","Musterstraße 12"),
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}},makeField("PLZ","plz","80331"),makeField("Stadt","city","München")),
+        makeField("Land","land","Deutschland"), errDiv
       ),
-      field("Land","land","Deutschland"),
-      err && e("div",{style:{fontSize:11,color:"#A32D2D"}},err)
-    ),
-    e("div",{style:{padding:"8px 12px",background:"#f8f8f7",display:"flex",gap:6,borderTop:"0.5px solid #eee"}},
-      e(Btn,{primary:true,small:true,onClick:()=>{if(!f.name||!f.street||!f.plz||!f.city){setErr("Alle Felder ausfüllen.");return;}onSubmit(f);}},"✓ Bestätigen"),
-      e(Btn,{small:true,onClick:onCancel},"Abbrechen")
+      h("div",{style:{padding:"8px 12px",background:"#f8f8f7",display:"flex",gap:"6px",borderTop:"0.5px solid #eee"}},
+        btn("✓ Bestätigen",true,()=>{
+          if(!fv.name||!fv.street||!fv.plz||!fv.city){errDiv.textContent="Alle Felder ausfüllen.";errDiv.style.display="block";return;}
+          submitAddr(fv);
+        },true),
+        btn("Abbrechen",false,()=>cancelForm("cancel"),true)
+      )
     )
   );
+}
+
+function cancelForm(act) {
+  messages[currentUser.id] = (messages[currentUser.id]||[]).filter(m=>!m.form);
+  if (act==="jira") {
+    typing=true; refreshChat();
+    setTimeout(()=>{
+      typing=false;
+      addBotMessage("",{card:{color:{bg:"#FCEBEB",text:"#791F1F",border:"#F09595",strong:"#A32D2D"},icon:"🎫",title:"Jira TK-2044 erstellt",rows:[["Ticket","TK-2044","red"],["Zugewiesen","Stammdaten-Team",""],["Status","Offen","amber"]]}});
+      addBotMessage("Ticket TK-2044 erstellt und Stammdaten-Team zugewiesen.");
+      refreshChat();
+    },1400);
+  } else {
+    addBotMessage("Abgebrochen. Schreib mir wenn du weitere Hilfe benötigst.");
+    refreshChat();
+  }
+}
+
+function submitEAN(e1,e2) {
+  messages[currentUser.id] = (messages[currentUser.id]||[]).filter(m=>!m.form);
+  addUserMessage(`EAN WC-00441: ${e1} · WC-00519: ${e2}`);
+  typing=true; refreshChat();
+  setTimeout(()=>{
+    typing=false;
+    addBotMessage("",{card:{color:{bg:"#EAF3DE",text:"#27500A",border:"#97C459",strong:"#3B6D11"},icon:"✅",title:"Stammdaten gespeichert – Sync OK",rows:[["EAN 1",e1,"green"],["EAN 2",e2,"green"],["Pulpo Transfer","12/12 Positionen","green"]]}});
+    addBotMessage("EAN gespeichert. Bestellung P91111 vollständig in Pulpo übertragen.");
+    refreshChat();
+  },1800);
+}
+
+function submitAddr(addr) {
+  messages[currentUser.id] = (messages[currentUser.id]||[]).filter(m=>!m.form);
+  addUserMessage(`${addr.name}, ${addr.street}, ${addr.plz} ${addr.city}`);
+  typing=true; refreshChat();
+  setTimeout(()=>{
+    typing=false;
+    addBotMessage("",{card:{color:{bg:"#EAF3DE",text:"#27500A",border:"#97C459",strong:"#3B6D11"},icon:"✅",title:"Adresse gespeichert",rows:[["Weclapp","Aktualisiert","green"],["Pulpo","Aktualisiert","green"],["DHL","Informiert","green"]]}});
+    addBotMessage("Adresse korrigiert und DHL informiert.");
+    refreshChat();
+  },1800);
+}
+
+async function sendMessage(text) {
+  text = text.trim();
+  if (!text || typing) return;
+  addUserMessage(text);
+  refreshChat();
+  const t = text.toLowerCase();
+
+  // EAN flow
+  if (t.includes("p91111") || (t.includes("ean")&&t.includes("fehlt")) || (t.includes("nicht")&&t.includes("pulpo"))) {
+    typing=true; refreshChat();
+    await delay(900); typing=false;
+    addBotMessage("",{card:{color:{bg:"#E6F1FB",text:"#0C447C",border:"#85B7EB",strong:"#185FA5"},icon:"🔍",title:"Diagnose – P91111",rows:[["Weclapp","Freigegeben","green"],["Pulpo Transfer","3× Fehlgeschlagen","red"],["Ursache","Fehlende EAN","red"]]}});
+    refreshChat();
+    await delay(400); typing=true; refreshChat();
+    await delay(1000); typing=false;
+    addBotMessage("2 Artikel ohne EAN blockieren den Transfer. Hast du die Nummern?",{form:"ean"});
+    refreshChat(); return;
+  }
+
+  // Address flow
+  if ((t.includes("adresse")&&(t.includes("fehler")||t.includes("falsch")))||t.includes("adressfehler")||t.includes("4821")) {
+    typing=true; refreshChat();
+    await delay(900); typing=false;
+    addBotMessage("Adressfehler erkannt. Bitte gib die vollständige Lieferadresse ein.",{form:"address"});
+    refreshChat(); return;
+  }
+
+  // Sync flow
+  if (t.includes("sync")||t.includes("synchron")) {
+    typing=true; refreshChat();
+    await delay(700); typing=false;
+    if (syncRunning) {
+      addBotMessage(`Sync läuft – nächster Zyklus in ${Math.floor(syncRemaining/60)}:${String(syncRemaining%60).padStart(2,"0")} Min.`);
+      refreshChat(); return;
+    }
+    addBotMessage("Sync-Überwachung gestartet. Ich melde mich nach dem nächsten Zyklus.");
+    syncRunning=true; syncRemaining=30; syncAttempts=0;
+    startSyncTimer();
+    refreshChat(); return;
+  }
+
+  // Claude API
+  typing=true; refreshChat();
+  try {
+    const apiKey = localStorage.getItem("altruan_api_key")||"";
+    const history = getMessages().slice(-12).map(m=>({role:m.from==="user"?"user":"assistant",content:m.text||(m.card?`[${m.card.title}]`:"")})).filter(m=>m.content.trim());
+    history.push({role:"user",content:text});
+    const resp = await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",headers:{"Content-Type":"application/json",...(apiKey?{"x-api-key":apiKey}:{})},
+      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:800,system:SYS_PROMPT,messages:history})
+    });
+    const data = await resp.json();
+    typing=false;
+    addBotMessage(data.content?.[0]?.text||"Bitte erneut versuchen.");
+  } catch {
+    typing=false;
+    addBotMessage("Verbindungsfehler. API-Key in Einstellungen prüfen.");
+  }
+  refreshChat();
+}
+
+function startSyncTimer() {
+  if (syncTimer) clearInterval(syncTimer);
+  syncTimer = setInterval(()=>{
+    syncRemaining--;
+    const bar = $("app")?.querySelector("[data-sync-fill]");
+    if (bar) bar.style.width = Math.round((600-syncRemaining)/600*100)+"%";
+    if (syncRemaining <= 0) {
+      clearInterval(syncTimer); syncTimer=null; syncRunning=false;
+      syncAttempts++;
+      if (syncAttempts >= 2) {
+        addBotMessage("",{card:{color:{bg:"#FCEBEB",text:"#791F1F",border:"#F09595",strong:"#A32D2D"},icon:"🎫",title:"Jira TK-2045 erstellt",rows:[["Ticket","TK-2045","red"],["Priorität","Hoch","red"],["Zugewiesen","DevOps-Team",""],["Status","Offen","amber"]]}});
+        addBotMessage("Jira TK-2045 erstellt und DevOps-Team zugewiesen.");
+      } else {
+        addBotMessage("",{card:{color:{bg:"#EAF3DE",text:"#27500A",border:"#97C459",strong:"#3B6D11"},icon:"✅",title:"Sync erfolgreich",rows:[["Datensätze","47/47","green"],["Dauer","11 Sek",""],["Fehler","0","green"]]}});
+        addBotMessage("Sync erfolgreich. 47 Datensätze übertragen.");
+      }
+      refreshChat();
+    }
+  },1000);
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -357,338 +517,355 @@ const EMPS=[
   {name:"Jonas Püttmann",init:"JP",bg:"#CECBF6",tc:"#3C3489",total:41,auto:32,fwd:7,open:2,rt:"0.8 Min"},
 ];
 
-function Dashboard() {
-  const [filter,setFilter] = useState("all");
-  const ft = filter==="all" ? TICKETS : TICKETS.filter(t=>t.status===filter);
-  const sP = s => ({auto:{bg:"#EAF3DE",c:"#3B6D11",l:"✓ Auto"},forwarded:{bg:"#EEEDFE",c:"#534AB7",l:"→ Weitergegeben"},open:{bg:"#FAEEDA",c:"#854F0B",l:"○ Offen"}}[s]);
-  const TH = {padding:"9px 12px",textAlign:"left",fontSize:11,fontWeight:500,color:"#888",borderBottom:"0.5px solid #e8e8e5"};
-  const TD = {padding:"9px 12px"};
-  return e("div",{style:{padding:20,overflowY:"auto",height:"100%"}},
-    e("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:18}},
-      [["Tickets",TICKETS.length,"#333"],["Auto-gelöst",TICKETS.filter(t=>t.status==="auto").length,"#3B6D11"],["Weitergegeben",TICKETS.filter(t=>t.status==="forwarded").length,"#534AB7"],["Ø Antwortzeit","1.1 Min","#854F0B"]].map(([l,v,c]) =>
-        e("div",{key:l,style:{background:"#f8f8f7",borderRadius:8,padding:"12px 14px"}},
-          e("div",{style:{fontSize:22,fontWeight:500,color:c}},v),
-          e("div",{style:{fontSize:11,color:"#888",marginTop:2}},l)
-        )
-      )
-    ),
-    e("div",{style:{fontSize:13,fontWeight:500,marginBottom:10}},"Mitarbeiter-Auswertung"),
-    e("div",{style:{border:"0.5px solid #e8e8e5",borderRadius:10,overflow:"hidden",marginBottom:18}},
-      e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},
-        e("thead",null,e("tr",{style:{background:"#f8f8f7"}},["Mitarbeiter","Gesamt","Verteilung","Auto-%","Ø Response"].map(h=>e("th",{key:h,style:TH},h)))),
-        e("tbody",null,EMPS.map(emp => {
-          const ap = Math.round(emp.auto/emp.total*100);
-          return e("tr",{key:emp.name,style:{borderBottom:"0.5px solid #eee"}},
-            e("td",{style:TD},e("div",{style:{display:"flex",alignItems:"center",gap:8}},
-              e("div",{style:{width:24,height:24,borderRadius:"50%",background:emp.bg,color:emp.tc,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:500}},emp.init),emp.name)),
-            e("td",{style:{...TD,fontWeight:500}},emp.total),
-            e("td",{style:{...TD,width:150}},
-              e("div",{style:{height:9,borderRadius:4,overflow:"hidden",display:"flex",gap:1}},
-                e("div",{style:{flex:emp.auto,background:"#639922"}}),e("div",{style:{flex:emp.fwd,background:"#534AB7"}}),e("div",{style:{flex:emp.open,background:"#EF9F27"}})),
-              e("div",{style:{fontSize:10,color:"#aaa",marginTop:2}},`${emp.auto} auto · ${emp.fwd} fwd`)
-            ),
-            e("td",{style:{...TD,fontWeight:500,color:ap>=70?"#3B6D11":"#854F0B"}},ap+"%"),
-            e("td",{style:{...TD,color:"#888"}},emp.rt)
-          );
-        }))
-      )
-    ),
-    e("div",{style:{display:"flex",gap:6,marginBottom:12}},
-      [["all","Alle"],["auto","Auto-gelöst"],["forwarded","Weitergegeben"],["open","Offen"]].map(([v,l]) =>
-        e("button",{key:v,onClick:()=>setFilter(v),style:{fontSize:12,padding:"5px 12px",borderRadius:16,border:"0.5px solid",cursor:"pointer",fontFamily:"inherit",borderColor:filter===v?"#534AB7":"#ccc",background:filter===v?"#534AB7":"white",color:filter===v?"white":"#666"}},l)
-      )
-    ),
-    e("div",{style:{border:"0.5px solid #e8e8e5",borderRadius:10,overflow:"hidden"}},
-      e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},
-        e("thead",null,e("tr",{style:{background:"#f8f8f7"}},["ID","Von","Betreff","Status","Response","Datum"].map(h=>e("th",{key:h,style:TH},h)))),
-        e("tbody",null,ft.map(t => {
-          const sp = sP(t.status);
-          return e("tr",{key:t.id,style:{borderBottom:"0.5px solid #eee"}},
-            e("td",{style:{...TD,fontFamily:"monospace",fontSize:11,color:"#888"}},t.id),
-            e("td",{style:TD},t.user),e("td",{style:TD},t.subj),
-            e("td",{style:TD},e(Tag,{bg:sp.bg,color:sp.c},sp.l)),
-            e("td",{style:{...TD,color:"#888"}},t.rt),
-            e("td",{style:{...TD,color:"#aaa",fontSize:11}},t.date)
-          );
-        }))
-      )
+function renderDashboard(container) {
+  container.innerHTML="";
+  const sP = s=>({auto:{bg:"#EAF3DE",c:"#3B6D11",l:"✓ Auto"},forwarded:{bg:"#EEEDFE",c:"#534AB7",l:"→ Weitergegeben"},open:{bg:"#FAEEDA",c:"#854F0B",l:"○ Offen"}}[s]);
+  const TH={padding:"9px 12px",textAlign:"left",fontSize:"11px",fontWeight:500,color:"#888",borderBottom:"0.5px solid #e8e8e5"};
+  const TD={padding:"9px 12px"};
+  let filterVal="all";
+
+  const wrap = h("div",{style:{padding:"20px",overflowY:"auto",height:"100%"}});
+
+  // KPIs
+  wrap.appendChild(h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"10px",marginBottom:"18px"}},
+    ...[["Tickets",TICKETS.length,"#333"],["Auto-gelöst",TICKETS.filter(t=>t.status==="auto").length,"#3B6D11"],["Weitergegeben",TICKETS.filter(t=>t.status==="forwarded").length,"#534AB7"],["Ø Antwortzeit","1.1 Min","#854F0B"]].map(([l,v,c])=>
+      h("div",{style:{background:"#f8f8f7",borderRadius:"8px",padding:"12px 14px"}},h("div",{style:{fontSize:"22px",fontWeight:500,color:c}},String(v)),h("div",{style:{fontSize:"11px",color:"#888",marginTop:"2px"}},l))
     )
-  );
+  ));
+
+  // Employees table
+  wrap.appendChild(h("div",{style:{fontSize:"13px",fontWeight:500,marginBottom:"10px"}},"Mitarbeiter-Auswertung"));
+  const empTable = h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:"12px"}});
+  empTable.appendChild(h("thead",null,h("tr",{style:{background:"#f8f8f7"}},
+    ...["Mitarbeiter","Gesamt","Verteilung","Auto-%","Ø Response"].map(l=>h("th",{style:TH},l))
+  )));
+  const empTbody = h("tbody",null);
+  for (const emp of EMPS) {
+    const ap = Math.round(emp.auto/emp.total*100);
+    empTbody.appendChild(h("tr",{style:{borderBottom:"0.5px solid #eee"}},
+      h("td",{style:TD},h("div",{style:{display:"flex",alignItems:"center",gap:"8px"}},
+        h("div",{style:{width:"24px",height:"24px",borderRadius:"50%",background:emp.bg,color:emp.tc,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"10px",fontWeight:500}},emp.init),emp.name)),
+      h("td",{style:{...TD,fontWeight:500}},String(emp.total)),
+      h("td",{style:{...TD,width:"150px"}},
+        h("div",{style:{height:"9px",borderRadius:"4px",overflow:"hidden",display:"flex",gap:"1px"}},
+          h("div",{style:{flex:emp.auto,background:"#639922"}}),h("div",{style:{flex:emp.fwd,background:"#534AB7"}}),h("div",{style:{flex:emp.open,background:"#EF9F27"}})),
+        h("div",{style:{fontSize:"10px",color:"#aaa",marginTop:"2px"}},`${emp.auto} auto · ${emp.fwd} fwd`)),
+      h("td",{style:{...TD,fontWeight:500,color:ap>=70?"#3B6D11":"#854F0B"}},ap+"%"),
+      h("td",{style:{...TD,color:"#888"}},emp.rt)
+    ));
+  }
+  empTable.appendChild(empTbody);
+  wrap.appendChild(h("div",{style:{border:"0.5px solid #e8e8e5",borderRadius:"10px",overflow:"hidden",marginBottom:"18px"}},empTable));
+
+  // Filter buttons
+  const filterRow = h("div",{style:{display:"flex",gap:"6px",marginBottom:"12px"}});
+  const renderTicketTable = () => {
+    tBody.innerHTML="";
+    const ft = filterVal==="all" ? TICKETS : TICKETS.filter(t=>t.status===filterVal);
+    for (const t of ft) {
+      const sp=sP(t.status);
+      tBody.appendChild(h("tr",{style:{borderBottom:"0.5px solid #eee"}},
+        h("td",{style:{...TD,fontFamily:"monospace",fontSize:"11px",color:"#888"}},t.id),
+        h("td",{style:TD},t.user),h("td",{style:TD},t.subj),
+        h("td",{style:TD},tag(sp.l,sp.bg,sp.c)),
+        h("td",{style:{...TD,color:"#888"}},t.rt),
+        h("td",{style:{...TD,color:"#aaa",fontSize:"11px"}},t.date)
+      ));
+    }
+  };
+
+  const filterBtns={};
+  for (const [v,l] of [["all","Alle"],["auto","Auto-gelöst"],["forwarded","Weitergegeben"],["open","Offen"]]) {
+    const b = h("button",{style:{fontSize:"12px",padding:"5px 12px",borderRadius:"16px",border:`0.5px solid ${v===filterVal?"#534AB7":"#ccc"}`,background:v===filterVal?"#534AB7":"white",color:v===filterVal?"white":"#666",cursor:"pointer",fontFamily:"inherit"},
+      onClick:()=>{ filterVal=v; Object.entries(filterBtns).forEach(([k,el])=>{ el.style.background=k===v?"#534AB7":"white"; el.style.color=k===v?"white":"#666"; el.style.borderColor=k===v?"#534AB7":"#ccc"; }); renderTicketTable(); }
+    },l);
+    filterBtns[v]=b; filterRow.appendChild(b);
+  }
+  wrap.appendChild(filterRow);
+
+  const tTable = h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:"12px"}});
+  tTable.appendChild(h("thead",null,h("tr",{style:{background:"#f8f8f7"}},
+    ...["ID","Von","Betreff","Status","Response","Datum"].map(l=>h("th",{style:TH},l))
+  )));
+  const tBody = h("tbody",null);
+  tTable.appendChild(tBody);
+  wrap.appendChild(h("div",{style:{border:"0.5px solid #e8e8e5",borderRadius:"10px",overflow:"hidden"}},tTable));
+  renderTicketTable();
+  container.appendChild(wrap);
 }
 
 // ── API Manager ───────────────────────────────────────────────────────────────
-function APIManager() {
-  const [apis,setApis] = useState(() => { try { const s=localStorage.getItem("altruan_apis"); return s?JSON.parse(s):DEFAULT_APIS; } catch { return DEFAULT_APIS; } });
-  const [showAdd,setShowAdd] = useState(false); const [editId,setEditId] = useState(null);
-  const [form,setForm] = useState({name:"",cat:"ERP",url:"",key:"",env:"prod"}); const [search,setSearch] = useState("");
-  useEffect(() => { try { localStorage.setItem("altruan_apis",JSON.stringify(apis)); } catch {} }, [apis]);
-  const filtered = apis.filter(a => a.name.toLowerCase().includes(search.toLowerCase()));
-  const sC = s => s==="active"?"#3B6D11":s==="warn"?"#854F0B":"#A32D2D";
-  const sBg = s => s==="active"?"#EAF3DE":s==="warn"?"#FAEEDA":"#FCEBEB";
-  const sL = s => s==="active"?"✓ Aktiv":s==="warn"?"⚠ Warnung":"✕ Inaktiv";
-  const TH = {padding:"9px 12px",textAlign:"left",fontSize:11,fontWeight:500,color:"#888",borderBottom:"0.5px solid #e8e8e5"};
-  const TD = {padding:"10px 12px"};
-  const save = () => {
-    if (!form.name || !form.key) return;
-    if (editId) setApis(p=>p.map(a=>a.id===editId?{...a,...form}:a));
-    else setApis(p=>[...p,{...form,id:Date.now(),status:"active"}]);
-    setShowAdd(false); setEditId(null); setForm({name:"",cat:"ERP",url:"",key:"",env:"prod"});
-  };
-  return e("div",{style:{padding:20,overflowY:"auto",height:"100%"}},
-    e("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}},
-      [["Gesamt",apis.length,"#333"],["Aktiv",apis.filter(a=>a.status==="active").length,"#3B6D11"],["Warnung",apis.filter(a=>a.status==="warn").length,"#854F0B"],["Inaktiv",apis.filter(a=>a.status==="inactive").length,"#A32D2D"]].map(([l,v,c]) =>
-        e("div",{key:l,style:{background:"#f8f8f7",borderRadius:8,padding:"12px 14px"}},e("div",{style:{fontSize:22,fontWeight:500,color:c}},v),e("div",{style:{fontSize:11,color:"#888",marginTop:2}},l))
-      )
-    ),
-    e("div",{style:{display:"flex",gap:8,marginBottom:14}},
-      e("input",{value:search,onChange:ev=>setSearch(ev.target.value),placeholder:"Suchen...",style:{flex:1,padding:"7px 12px",borderRadius:8,border:"0.5px solid #ccc",fontSize:13}}),
-      e(Btn,{primary:true,onClick:()=>{setShowAdd(true);setEditId(null);setForm({name:"",cat:"ERP",url:"",key:"",env:"prod"});}},"+ API hinzufügen")
-    ),
-    showAdd && e("div",{style:{background:"#f0effc",border:"1px solid #AFA9EC",borderRadius:10,padding:16,marginBottom:16}},
-      e("div",{style:{fontSize:13,fontWeight:500,color:"#3C3489",marginBottom:12}},editId?"Bearbeiten":"Neue Schnittstelle"),
-      e("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-        e("div",null,e("div",{style:{fontSize:11,color:"#888",marginBottom:4}},"Name"),e("input",{value:form.name,onChange:ev=>setForm(p=>({...p,name:ev.target.value})),placeholder:"z.B. FedEx",style:{width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #ccc",fontSize:12,boxSizing:"border-box"}})),
-        e("div",null,e("div",{style:{fontSize:11,color:"#888",marginBottom:4}},"Basis-URL"),e("input",{value:form.url,onChange:ev=>setForm(p=>({...p,url:ev.target.value})),placeholder:"https://api...",style:{width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #ccc",fontSize:12,boxSizing:"border-box"}})),
-        e("div",null,e("div",{style:{fontSize:11,color:"#888",marginBottom:4}},"Kategorie"),
-          e("select",{value:form.cat,onChange:ev=>setForm(p=>({...p,cat:ev.target.value})),style:{width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #ccc",fontSize:12}},
-            ["CRM","ERP","WMS","Ticketing","Carrier","Messaging","Shop","Marktplatz"].map(c=>e("option",{key:c},c)))),
-        e("div",null,e("div",{style:{fontSize:11,color:"#888",marginBottom:4}},"Umgebung"),
-          e("select",{value:form.env,onChange:ev=>setForm(p=>({...p,env:ev.target.value})),style:{width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #ccc",fontSize:12}},
-            e("option",{value:"prod"},"Produktion"),e("option",{value:"stage"},"Staging"))),
-        e("div",{style:{gridColumn:"1/-1"}},
-          e("div",{style:{fontSize:11,color:"#888",marginBottom:4}},"API-Key",editId&&e("span",{style:{color:"#aaa"}}," (leer = unverändert)")),
-          e("input",{type:"password",value:form.key,onChange:ev=>setForm(p=>({...p,key:ev.target.value})),placeholder:"sk-...",style:{width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #ccc",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}))
-      ),
-      e("div",{style:{display:"flex",gap:8,marginTop:12}},e(Btn,{primary:true,onClick:save},"✓ Speichern"),e(Btn,{onClick:()=>{setShowAdd(false);setEditId(null);}},"Abbrechen"))
-    ),
-    e("div",{style:{border:"0.5px solid #e8e8e5",borderRadius:10,overflow:"hidden"}},
-      e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},
-        e("thead",null,e("tr",{style:{background:"#f8f8f7"}},["System","Kategorie","API-Key","Umgebung","Status",""].map(h=>e("th",{key:h,style:TH},h)))),
-        e("tbody",null,filtered.map(api =>
-          e("tr",{key:api.id,style:{borderBottom:"0.5px solid #eee"}},
-            e("td",{style:{...TD,fontWeight:500}},api.name),
-            e("td",{style:TD},e(Tag,{bg:"#f0f0f0",color:"#555"},api.cat)),
-            e("td",{style:{...TD,fontFamily:"monospace",fontSize:11,color:"#888"}},api.key),
-            e("td",{style:TD},e(Tag,{bg:api.env==="prod"?"#EAF3DE":"#FAEEDA",color:api.env==="prod"?"#3B6D11":"#854F0B"},api.env==="prod"?"Prod":"Stage")),
-            e("td",{style:TD},e(Tag,{bg:sBg(api.status),color:sC(api.status)},sL(api.status))),
-            e("td",{style:TD},
-              e("div",{style:{display:"flex",gap:4}},
-                e(Btn,{small:true,onClick:()=>{setForm({name:api.name,cat:api.cat,url:api.url||"",key:"",env:api.env});setEditId(api.id);setShowAdd(true);}},"✎"),
-                e(Btn,{small:true,danger:true,onClick:()=>setApis(p=>p.filter(a=>a.id!==api.id))},"✕")
-              )
-            )
-          )
-        ))
-      )
+function renderAPIs(container) {
+  container.innerHTML="";
+  const TH={padding:"9px 12px",textAlign:"left",fontSize:"11px",fontWeight:500,color:"#888",borderBottom:"0.5px solid #e8e8e5"};
+  const TD={padding:"10px 12px"};
+  const sC=s=>s==="active"?"#3B6D11":s==="warn"?"#854F0B":"#A32D2D";
+  const sBg=s=>s==="active"?"#EAF3DE":s==="warn"?"#FAEEDA":"#FCEBEB";
+  const sL=s=>s==="active"?"✓ Aktiv":s==="warn"?"⚠ Warnung":"✕ Inaktiv";
+  let search="", showAdd=false, editId=null, form={name:"",cat:"ERP",url:"",key:"",env:"prod"};
+
+  const wrap = h("div",{style:{padding:"20px",overflowY:"auto",height:"100%"}});
+
+  const rerender = () => { renderAPIs(container); };
+
+  // KPIs
+  wrap.appendChild(h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"10px",marginBottom:"16px"}},
+    ...[["Gesamt",apis.length,"#333"],["Aktiv",apis.filter(a=>a.status==="active").length,"#3B6D11"],["Warnung",apis.filter(a=>a.status==="warn").length,"#854F0B"],["Inaktiv",apis.filter(a=>a.status==="inactive").length,"#A32D2D"]].map(([l,v,c])=>
+      h("div",{style:{background:"#f8f8f7",borderRadius:"8px",padding:"12px 14px"}},h("div",{style:{fontSize:"22px",fontWeight:500,color:c}},String(v)),h("div",{style:{fontSize:"11px",color:"#888",marginTop:"2px"}},l))
     )
-  );
+  ));
+
+  const searchInp = h("input",{style:{flex:1,padding:"7px 12px",borderRadius:"8px",border:"0.5px solid #ccc",fontSize:"13px"},placeholder:"Suchen..."});
+  searchInp.addEventListener("input",ev=>{ search=ev.target.value; renderTableRows(); });
+  wrap.appendChild(h("div",{style:{display:"flex",gap:"8px",marginBottom:"14px"}},
+    searchInp,
+    btn("+ API hinzufügen",true,()=>{ showAdd=true; editId=null; form={name:"",cat:"ERP",url:"",key:"",env:"prod"}; rerender(); })
+  ));
+
+  if (showAdd) {
+    const makeInp=(label,key,ph,type="text")=>{
+      const inp=h("input",{type,placeholder:ph,style:{width:"100%",padding:"7px 10px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"12px",boxSizing:"border-box"}});
+      if(form[key]) inp.value=form[key];
+      inp.addEventListener("input",ev=>form[key]=ev.target.value);
+      return h("div",null,h("div",{style:{fontSize:"11px",color:"#888",marginBottom:"4px"}},label,key==="key"&&editId?h("span",{style:{color:"#aaa"}}," (leer = unverändert)"):null),inp);
+    };
+    const catSel=h("select",{style:{width:"100%",padding:"7px 10px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"12px"}},
+      ...["CRM","ERP","WMS","Ticketing","Carrier","Messaging","Shop","Marktplatz"].map(c=>{const o=h("option",{value:c},c);if(c===form.cat)o.selected=true;return o;})
+    );
+    catSel.addEventListener("change",ev=>form.cat=ev.target.value);
+    const envSel=h("select",{style:{width:"100%",padding:"7px 10px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"12px"}},
+      ...([["prod","Produktion"],["stage","Staging"]].map(([v,l])=>{const o=h("option",{value:v},l);if(v===form.env)o.selected=true;return o;}))
+    );
+    envSel.addEventListener("change",ev=>form.env=ev.target.value);
+    wrap.appendChild(h("div",{style:{background:"#f0effc",border:"1px solid #AFA9EC",borderRadius:"10px",padding:"16px",marginBottom:"16px"}},
+      h("div",{style:{fontSize:"13px",fontWeight:500,color:"#3C3489",marginBottom:"12px"}},editId?"Bearbeiten":"Neue Schnittstelle"),
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}},
+        makeInp("Name","name","z.B. FedEx"),makeInp("Basis-URL","url","https://api..."),
+        h("div",null,h("div",{style:{fontSize:"11px",color:"#888",marginBottom:"4px"}},"Kategorie"),catSel),
+        h("div",null,h("div",{style:{fontSize:"11px",color:"#888",marginBottom:"4px"}},"Umgebung"),envSel),
+        h("div",{style:{gridColumn:"1/-1"}},makeInp("API-Key","key","sk-...","password"))
+      ),
+      h("div",{style:{display:"flex",gap:"8px",marginTop:"12px"}},
+        btn("✓ Speichern",true,()=>{
+          if(!form.name||!form.key)return;
+          if(editId){apis=apis.map(a=>a.id===editId?{...a,...form}:a);}
+          else{apis=[...apis,{...form,id:Date.now(),status:"active"}];}
+          saveApis(); rerender();
+        }),
+        btn("Abbrechen",false,()=>{ showAdd=false; rerender(); })
+      )
+    ));
+  }
+
+  const tbl=h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:"12px"}});
+  tbl.appendChild(h("thead",null,h("tr",{style:{background:"#f8f8f7"}},
+    ...["System","Kategorie","API-Key","Umgebung","Status",""].map(l=>h("th",{style:TH},l))
+  )));
+  const tBody=h("tbody",null);
+  tbl.appendChild(tBody);
+  wrap.appendChild(h("div",{style:{border:"0.5px solid #e8e8e5",borderRadius:"10px",overflow:"hidden"}},tbl));
+
+  const renderTableRows = () => {
+    tBody.innerHTML="";
+    const filtered=apis.filter(a=>a.name.toLowerCase().includes(search.toLowerCase()));
+    for (const api of filtered) {
+      tBody.appendChild(h("tr",{style:{borderBottom:"0.5px solid #eee"}},
+        h("td",{style:{...TD,fontWeight:500}},api.name),
+        h("td",{style:TD},tag(api.cat,"#f0f0f0","#555")),
+        h("td",{style:{...TD,fontFamily:"monospace",fontSize:"11px",color:"#888"}},api.key),
+        h("td",{style:TD},tag(api.env==="prod"?"Prod":"Stage",api.env==="prod"?"#EAF3DE":"#FAEEDA",api.env==="prod"?"#3B6D11":"#854F0B")),
+        h("td",{style:TD},tag(sL(api.status),sBg(api.status),sC(api.status))),
+        h("td",{style:TD},h("div",{style:{display:"flex",gap:"4px"}},
+          btn("✎",false,()=>{ form={name:api.name,cat:api.cat,url:api.url||"",key:"",env:api.env}; editId=api.id; showAdd=true; rerender(); },true),
+          btn("✕",false,()=>{ apis=apis.filter(a=>a.id!==api.id); saveApis(); rerender(); },true,true)
+        ))
+      ));
+    }
+  };
+  renderTableRows();
+  container.appendChild(wrap);
 }
 
 // ── Customer Chat ─────────────────────────────────────────────────────────────
-function CustomerChat({onBack}) {
-  const [step,setStep] = useState("select"); const [mode,setMode] = useState(null);
-  const [verified,setVerified] = useState(null); const [ticket,setTicket] = useState(null);
-  const [msgs,setMsgs] = useState([]); const [input,setInput] = useState(""); const [typing,setTyping] = useState(false);
-  const [af,setAf] = useState({name:"",email:"",phone:"",artikel:"",menge:""}); const [afErr,setAfErr] = useState("");
-  const [vf,setVf] = useState({order:"",email:""}); const [vErr,setVErr] = useState(""); const [vLoad,setVLoad] = useState(false);
-  const bottomRef = useRef(null);
-  useEffect(() => { bottomRef.current?.scrollIntoView({behavior:"smooth"}); }, [msgs,typing]);
-  useEffect(() => {
-    if (step==="chat" && !msgs.length) {
-      const g = mode==="angebot"&&ticket ? `Hallo ${ticket.name.split(" ")[0]}! Ticket ${ticket.nr} erfasst.` : verified ? `Hallo ${verified.name.split(" ")[0]}! Bestellung ${verified.orderNr} gefunden.` : "Hallo!";
-      setTimeout(() => setMsgs([{id:uid(),from:"bot",text:g,time:tnow()}]), 400);
-    }
-  }, [step]); // eslint-disable-line
+function renderCustomer(container) {
+  container.innerHTML="";
+  custStep="select"; custMode=null; custVerified=null; custTicket=null; custMsgs=[];
+  renderCustView(container);
+}
 
-  const IS = {width:"100%",padding:"9px 12px",borderRadius:9,border:"1.5px solid #e0dfd8",fontSize:13,outline:"none",boxSizing:"border-box",marginBottom:10};
+function renderCustView(container) {
+  container.innerHTML="";
+  const IS={width:"100%",padding:"9px 12px",borderRadius:"9px",border:"1.5px solid #e0dfd8",fontSize:"13px",outline:"none",boxSizing:"border-box",marginBottom:"10px"};
 
-  const sendChat = async () => {
-    const text = input.trim(); if (!text||typing) return; setInput("");
-    const history = [...msgs];
-    setMsgs(p => [...p, {id:uid(),from:"user",text,time:tnow()}]); setTyping(true);
-    try {
-      const apiKey = localStorage.getItem("altruan_api_key") || "";
-      const ctx = verified ? `\nKunde: ${verified.name}\nBestellung: ${verified.orderNr}\nStatus: ${verified.status}\nTracking: ${verified.tracking}\nETA: ${verified.eta}` : (ticket ? `\nTicket: ${ticket.nr}\nArtikel: ${ticket.artikel}` : "");
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST", headers:{"Content-Type":"application/json",...(apiKey?{"x-api-key":apiKey}:{})},
-        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:600,system:`Du bist der Altruan Kunden-Assistent. Antworte auf Deutsch, freundlich.${ctx}`,
-          messages:[...history.slice(-10).map(m=>({role:m.from==="user"?"user":"assistant",content:m.text||""})).filter(m=>m.content.trim()),{role:"user",content:text}]})
-      });
-      const data = await resp.json(); setTyping(false);
-      setMsgs(p => [...p, {id:uid(),from:"bot",text:data.content?.[0]?.text||"Bitte erneut.",time:tnow()}]);
-    } catch { setTyping(false); setMsgs(p => [...p, {id:uid(),from:"bot",text:"Verbindungsfehler.",time:tnow()}]); }
-  };
-
-  return e("div",{style:{display:"flex",flexDirection:"column",height:"100%",background:"white"}},
-    e("div",{style:{background:TP,padding:"10px 14px",display:"flex",alignItems:"center",gap:10,flexShrink:0}},
-      e("button",{onClick:onBack,style:{background:"rgba(255,255,255,.15)",border:"none",borderRadius:6,padding:"3px 8px",color:"white",fontSize:11,cursor:"pointer"}},"← Zurück"),
-      e("div",{style:{width:28,height:28,borderRadius:"50%",background:"#EEEDFE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}},"🤖"),
-      e("div",{style:{fontSize:13,fontWeight:500,color:"white"}},"Altruan Kundenservice")
-    ),
-    step==="select" && e("div",{style:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}},
-      e("div",{style:{fontSize:22,marginBottom:8}},"🤖"),
-      e("div",{style:{fontSize:16,fontWeight:500,marginBottom:20}},"Wie können wir helfen?"),
-      e("div",{style:{width:"100%",maxWidth:300,display:"flex",flexDirection:"column",gap:10}},
-        [["📋","Anfrage Angebot","Angebot anfragen","angebot","#EAF3DE"],["📦","Anfrage Auftrag","Bestehende Bestellung","auftrag","#E6F1FB"]].map(([ico,t,d,m,bg]) =>
-          e("button",{key:m,onClick:()=>{setMode(m);setStep(m==="angebot"?"angebot-form":"verify");},style:{padding:"14px 16px",borderRadius:11,border:"1.5px solid #e0dfd8",background:"white",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:12,fontFamily:"inherit"}},
-            e("div",{style:{width:34,height:34,borderRadius:9,background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}},ico),
-            e("div",null,e("div",{style:{fontSize:14,fontWeight:500}},t),e("div",{style:{fontSize:12,color:"#888"}},d)),
-            e("span",{style:{marginLeft:"auto",color:"#ccc"}},"›")
-          )
-        )
-      )
-    ),
-    step==="angebot-form" && e("div",{style:{flex:1,overflowY:"auto",padding:20}},
-      e("button",{onClick:()=>setStep("select"),style:{background:"none",border:"none",cursor:"pointer",color:"#888",fontSize:13,marginBottom:14,fontFamily:"inherit"}},"← Zurück"),
-      e("div",{style:{fontSize:15,fontWeight:500,marginBottom:16}},"📋 Anfrage Angebot"),
-      [["Name","name","Vor- und Nachname","text"],["E-Mail","email","deine@email.de","email"],["Telefon","phone","+49 89 123456","tel"],["Artikel","artikel","Artikelname","text"],["Menge","menge","z.B. 50 Stück","text"]].map(([l,k,p,type]) =>
-        e("div",{key:k},e("div",{style:{fontSize:12,color:"#555",marginBottom:4,fontWeight:500}},l),e("input",{type,value:af[k],onChange:ev=>setAf(p2=>({...p2,[k]:ev.target.value})),placeholder:p,style:{...IS,borderColor:afErr&&!af[k]?"#E24B4A":"#e0dfd8"}}))
-      ),
-      afErr && e("div",{style:{fontSize:12,color:"#A32D2D",marginBottom:10}},afErr),
-      e(Btn,{primary:true,onClick:()=>{
-        if(!af.name||!af.email||!af.phone||!af.artikel||!af.menge){setAfErr("Alle Felder ausfüllen.");return;}
-        if(!/\S+@\S+\.\S+/.test(af.email)){setAfErr("Ungültige E-Mail.");return;}
-        setTicket({nr:`ANG-${1000+Math.floor(Math.random()*999)}`,...af,created:new Date().toLocaleDateString("de-DE")});
-        setStep("ticket-confirm");
-      }},"Anfrage absenden →")
-    ),
-    step==="verify" && e("div",{style:{flex:1,overflowY:"auto",padding:20}},
-      e("button",{onClick:()=>setStep("select"),style:{background:"none",border:"none",cursor:"pointer",color:"#888",fontSize:13,marginBottom:14,fontFamily:"inherit"}},"← Zurück"),
-      e("div",{style:{fontSize:15,fontWeight:500,marginBottom:16}},"📦 Anfrage Auftrag"),
-      e("div",{style:{fontSize:12,color:"#555",marginBottom:4,fontWeight:500}},"Bestellnummer"),
-      e("input",{value:vf.order,onChange:ev=>setVf(p=>({...p,order:ev.target.value})),placeholder:"z.B. ORD-10042",style:{...IS,fontFamily:"monospace"}}),
-      e("div",{style:{fontSize:12,color:"#555",marginBottom:4,fontWeight:500}},"E-Mail"),
-      e("input",{type:"email",value:vf.email,onChange:ev=>setVf(p=>({...p,email:ev.target.value})),placeholder:"deine@email.de",style:IS}),
-      vErr && e("div",{style:{fontSize:12,color:"#A32D2D",marginBottom:8}},vErr),
-      e(Btn,{primary:true,disabled:vLoad||!vf.order||!vf.email,onClick:()=>{
-        setVErr("");
-        const key=vf.order.trim().toUpperCase(); const em=vf.email.trim().toLowerCase();
-        const found=MOCK_ORDERS[key];
-        if(!found){setVErr("Bestellnummer nicht gefunden.");return;}
-        if(found.email.toLowerCase()!==em){setVErr("E-Mail stimmt nicht überein.");return;}
-        setVLoad(true); setTimeout(()=>{setVLoad(false);setVerified({orderNr:key,...found});setStep("chat");},1000);
-      }},vLoad?"Wird geprüft…":"Weiter →"),
-      e("div",{style:{marginTop:12,background:"#f8f8f7",borderRadius:8,padding:"9px 11px",fontSize:11,color:"#888"}},e("strong",{style:{color:"#666"}},"Test: "),"ORD-10042 · jonas.puettmann@altruan.de")
-    ),
-    step==="ticket-confirm" && ticket && e("div",{style:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20}},
-      e("div",{style:{fontSize:28,marginBottom:8}},"✅"),
-      e("div",{style:{fontSize:16,fontWeight:500,marginBottom:6}},"Anfrage eingegangen!"),
-      e("div",{style:{fontSize:13,color:"#888",textAlign:"center",marginBottom:18,lineHeight:1.6}},"Unser Team meldet sich innerhalb 1 Werktag."),
-      e("div",{style:{width:"100%",maxWidth:290,background:"#f8f8f7",borderRadius:10,overflow:"hidden",border:"0.5px solid #e8e8e5",marginBottom:16}},
-        e("div",{style:{background:TP,padding:"8px 13px",fontSize:12,fontWeight:500,color:"#EEEDFE",display:"flex",justifyContent:"space-between"}},e("span",null,"Ticket"),e("span",null,ticket.nr)),
-        [["Name",ticket.name],["Artikel",ticket.artikel],["Menge",ticket.menge],["Telefon",ticket.phone]].map(([k,v]) =>
-          e("div",{key:k,style:{display:"flex",justifyContent:"space-between",fontSize:12,padding:"6px 13px",borderBottom:"0.5px solid #eee"}},e("span",{style:{color:"#888"}},k),e("span",{style:{fontWeight:500}},v))
-        )
-      ),
-      e(Btn,{primary:true,onClick:()=>setStep("chat")},"Weitere Fragen →")
-    ),
-    step==="chat" && e(React.Fragment,null,
-      e("div",{style:{flex:1,overflowY:"auto",padding:14,display:"flex",flexDirection:"column",gap:8}},
-        msgs.map(m => {
-          const isMe = m.from==="user";
-          return e("div",{key:m.id,style:{display:"flex",gap:7,alignItems:"flex-end",flexDirection:isMe?"row-reverse":"row"}},
-            !isMe && e("div",{style:{width:24,height:24,borderRadius:"50%",background:"#EEEDFE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0}},"🤖"),
-            e("div",{style:{borderRadius:11,padding:"8px 12px",fontSize:13,lineHeight:1.5,maxWidth:"78%",...(isMe?{background:TP,color:"white",borderBottomRightRadius:3}:{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderBottomLeftRadius:3,color:"#222"})}},m.text)
-          );
-        }),
-        typing && e("div",{style:{display:"flex",gap:7}},
-          e("div",{style:{width:24,height:24,borderRadius:"50%",background:"#EEEDFE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12}},"🤖"),
-          e("div",{style:{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderRadius:11,borderBottomLeftRadius:3,padding:"8px 12px",display:"flex",gap:4}},
-            [0,150,300].map(d=>e("div",{key:d,style:{width:5,height:5,borderRadius:"50%",background:"#aaa",animation:`bounce .9s ${d}ms infinite`}}))
-          )
-        ),
-        e("div",{ref:bottomRef})
-      ),
-      e("div",{style:{padding:"10px 14px",borderTop:"0.5px solid #eee",display:"flex",gap:8,flexShrink:0}},
-        e("input",{value:input,onChange:ev=>setInput(ev.target.value),onKeyDown:ev=>ev.key==="Enter"&&sendChat(),placeholder:"Deine Frage...",style:{flex:1,padding:"8px 13px",borderRadius:18,border:"1px solid #e0dfd8",fontSize:13,outline:"none",background:"#f8f8f7"}}),
-        e("button",{onClick:sendChat,disabled:!input.trim()||typing,style:{width:32,height:32,borderRadius:"50%",background:input.trim()&&!typing?TP:"#ccc",border:"none",cursor:"pointer",color:"white",fontSize:13,flexShrink:0}},"➤")
-      )
-    )
+  const header=h("div",{style:{background:TP,padding:"10px 14px",display:"flex",alignItems:"center",gap:"10px",flexShrink:0}},
+    h("button",{style:{background:"rgba(255,255,255,.15)",border:"none",borderRadius:"6px",padding:"3px 8px",color:"white",fontSize:"11px",cursor:"pointer"},onClick:()=>{currentView="chat";renderShell();}},"← Zurück"),
+    h("div",{style:{width:"28px",height:"28px",borderRadius:"50%",background:"#EEEDFE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",flexShrink:0}},"🤖"),
+    h("div",{style:{fontSize:"13px",fontWeight:500,color:"white"}},"Altruan Kundenservice")
   );
+  container.appendChild(header);
+
+  const body=h("div",{style:{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}});
+  container.appendChild(body);
+  container.style.display="flex";
+  container.style.flexDirection="column";
+  container.style.height="100%";
+
+  if (custStep==="select") {
+    body.style.justifyContent="center";body.style.alignItems="center";body.style.padding="24px";
+    body.appendChild(h("div",{style:{fontSize:"22px",marginBottom:"8px"}},"🤖"));
+    body.appendChild(h("div",{style:{fontSize:"16px",fontWeight:500,marginBottom:"20px"}},"Wie können wir helfen?"));
+    const optWrap=h("div",{style:{width:"100%",maxWidth:"300px",display:"flex",flexDirection:"column",gap:"10px"}});
+    for (const [ico,t,d,m,bg] of [["📋","Anfrage Angebot","Angebot anfragen","angebot","#EAF3DE"],["📦","Anfrage Auftrag","Bestehende Bestellung","auftrag","#E6F1FB"]]) {
+      optWrap.appendChild(h("button",{style:{padding:"14px 16px",borderRadius:"11px",border:"1.5px solid #e0dfd8",background:"white",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:"12px",fontFamily:"inherit",fontSize:"inherit"},
+        onClick:()=>{custMode=m;custStep=m==="angebot"?"angebot-form":"verify";renderCustView(container);}},
+        h("div",{style:{width:"34px",height:"34px",borderRadius:"9px",background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"18px"}},ico),
+        h("div",null,h("div",{style:{fontSize:"14px",fontWeight:500}},t),h("div",{style:{fontSize:"12px",color:"#888"}},d)),
+        h("span",{style:{marginLeft:"auto",color:"#ccc"}},"›")
+      ));
+    }
+    body.appendChild(optWrap);
+  }
+  else if (custStep==="angebot-form") {
+    body.style.overflowY="auto";body.style.padding="20px";
+    body.appendChild(h("button",{style:{background:"none",border:"none",cursor:"pointer",color:"#888",fontSize:"13px",marginBottom:"14px",fontFamily:"inherit"},onClick:()=>{custStep="select";renderCustView(container);}},"← Zurück"));
+    body.appendChild(h("div",{style:{fontSize:"15px",fontWeight:500,marginBottom:"16px"}},"📋 Anfrage Angebot"));
+    const af={name:"",email:"",phone:"",artikel:"",menge:""};
+    const errDiv=h("div",{style:{fontSize:"12px",color:"#A32D2D",marginBottom:"10px",display:"none"}});
+    for (const [l,k,p,type] of [["Name","name","Vor- und Nachname","text"],["E-Mail","email","deine@email.de","email"],["Telefon","phone","+49 89 123456","tel"],["Artikel","artikel","Artikelname","text"],["Menge","menge","z.B. 50 Stück","text"]]) {
+      const inp=h("input",{type,placeholder:p,style:{...IS,borderColor:"#e0dfd8"}});
+      inp.addEventListener("input",ev=>af[k]=ev.target.value);
+      body.appendChild(h("div",null,h("div",{style:{fontSize:"12px",color:"#555",marginBottom:"4px",fontWeight:500}},l),inp));
+    }
+    body.appendChild(errDiv);
+    body.appendChild(btn("Anfrage absenden →",true,()=>{
+      if(!af.name||!af.email||!af.phone||!af.artikel||!af.menge){errDiv.textContent="Alle Felder ausfüllen.";errDiv.style.display="block";return;}
+      if(!/\S+@\S+\.\S+/.test(af.email)){errDiv.textContent="Ungültige E-Mail.";errDiv.style.display="block";return;}
+      custTicket={nr:`ANG-${ticketCounter++}`,...af,created:new Date().toLocaleDateString("de-DE")};
+      custStep="ticket-confirm";renderCustView(container);
+    }));
+  }
+  else if (custStep==="verify") {
+    body.style.overflowY="auto";body.style.padding="20px";
+    body.appendChild(h("button",{style:{background:"none",border:"none",cursor:"pointer",color:"#888",fontSize:"13px",marginBottom:"14px",fontFamily:"inherit"},onClick:()=>{custStep="select";renderCustView(container);}},"← Zurück"));
+    body.appendChild(h("div",{style:{fontSize:"15px",fontWeight:500,marginBottom:"16px"}},"📦 Anfrage Auftrag"));
+    const vf={order:"",email:""};
+    const errDiv=h("div",{style:{fontSize:"12px",color:"#A32D2D",marginBottom:"8px",display:"none"}});
+    const oinp=h("input",{placeholder:"z.B. ORD-10042",style:{...IS,fontFamily:"monospace"}});
+    oinp.addEventListener("input",ev=>vf.order=ev.target.value);
+    const einp=h("input",{type:"email",placeholder:"deine@email.de",style:IS});
+    einp.addEventListener("input",ev=>vf.email=ev.target.value);
+    const vbtn=btn("Weiter →",true,()=>{
+      errDiv.style.display="none";
+      const key=vf.order.trim().toUpperCase();const em=vf.email.trim().toLowerCase();
+      const found=MOCK_ORDERS[key];
+      if(!found){errDiv.textContent="Bestellnummer nicht gefunden.";errDiv.style.display="block";return;}
+      if(found.email.toLowerCase()!==em){errDiv.textContent="E-Mail stimmt nicht überein.";errDiv.style.display="block";return;}
+      vbtn.textContent="Wird geprüft…";vbtn.disabled=true;
+      setTimeout(()=>{custVerified={orderNr:key,...found};custStep="chat";renderCustView(container);},1000);
+    });
+    body.appendChild(h("div",null,h("div",{style:{fontSize:"12px",color:"#555",marginBottom:"4px",fontWeight:500}},"Bestellnummer"),oinp));
+    body.appendChild(h("div",null,h("div",{style:{fontSize:"12px",color:"#555",marginBottom:"4px",fontWeight:500}},"E-Mail"),einp));
+    body.appendChild(errDiv);body.appendChild(vbtn);
+    body.appendChild(h("div",{style:{marginTop:"12px",background:"#f8f8f7",borderRadius:"8px",padding:"9px 11px",fontSize:"11px",color:"#888"}},h("strong",{style:{color:"#666"}},"Test: "),"ORD-10042 · jonas.puettmann@altruan.de"));
+  }
+  else if (custStep==="ticket-confirm") {
+    body.style.justifyContent="center";body.style.alignItems="center";body.style.padding="20px";
+    body.appendChild(h("div",{style:{fontSize:"28px",marginBottom:"8px"}},"✅"));
+    body.appendChild(h("div",{style:{fontSize:"16px",fontWeight:500,marginBottom:"6px"}},"Anfrage eingegangen!"));
+    body.appendChild(h("div",{style:{fontSize:"13px",color:"#888",textAlign:"center",marginBottom:"18px",lineHeight:1.6}},"Unser Team meldet sich innerhalb 1 Werktag."));
+    const card=h("div",{style:{width:"100%",maxWidth:"290px",background:"#f8f8f7",borderRadius:"10px",overflow:"hidden",border:"0.5px solid #e8e8e5",marginBottom:"16px"}});
+    card.appendChild(h("div",{style:{background:TP,padding:"8px 13px",fontSize:"12px",fontWeight:500,color:"#EEEDFE",display:"flex",justifyContent:"space-between"}},h("span",null,"Ticket"),h("span",null,custTicket.nr)));
+    for (const [k,v] of [["Name",custTicket.name],["Artikel",custTicket.artikel],["Menge",custTicket.menge],["Telefon",custTicket.phone]]) {
+      card.appendChild(h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:"12px",padding:"6px 13px",borderBottom:"0.5px solid #eee"}},h("span",{style:{color:"#888"}},k),h("span",{style:{fontWeight:500}},v)));
+    }
+    body.appendChild(card);
+    body.appendChild(btn("Weitere Fragen →",true,()=>{custMsgs=[];custStep="chat";renderCustView(container);}));
+  }
+  else if (custStep==="chat") {
+    if (!custMsgs.length) {
+      const g=custMode==="angebot"&&custTicket?`Hallo ${custTicket.name.split(" ")[0]}! Ticket ${custTicket.nr} erfasst.`:custVerified?`Hallo ${custVerified.name.split(" ")[0]}! Bestellung ${custVerified.orderNr} gefunden.`:"Hallo!";
+      setTimeout(()=>{custMsgs.push({id:uid(),from:"bot",text:g,time:tnow()});renderCustMsgs();},400);
+    }
+    const msgsDiv=h("div",{id:"cust-msgs",style:{flex:1,overflowY:"auto",padding:"14px",display:"flex",flexDirection:"column",gap:"8px"}});
+    const custInput=h("input",{placeholder:"Deine Frage...",style:{flex:1,padding:"8px 13px",borderRadius:"18px",border:"1px solid #e0dfd8",fontSize:"13px",background:"#f8f8f7"}});
+
+    const sendCust=async()=>{
+      const text=custInput.value.trim();if(!text)return;custInput.value="";
+      custMsgs.push({id:uid(),from:"user",text,time:tnow()});
+      renderCustMsgs();
+      const typDiv=typingBubble();msgsDiv.appendChild(typDiv);msgsDiv.scrollTop=msgsDiv.scrollHeight;
+      try {
+        const apiKey=localStorage.getItem("altruan_api_key")||"";
+        const ctx=custVerified?`\nKunde: ${custVerified.name}\nBestellung: ${custVerified.orderNr}\nStatus: ${custVerified.status}\nTracking: ${custVerified.tracking}`:custTicket?`\nTicket: ${custTicket.nr}\nArtikel: ${custTicket.artikel}`:"";
+        const hist=custMsgs.slice(-10).map(m=>({role:m.from==="user"?"user":"assistant",content:m.text||""})).filter(m=>m.content.trim());
+        hist.push({role:"user",content:text});
+        const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json",...(apiKey?{"x-api-key":apiKey}:{})},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:600,system:CUST_PROMPT+ctx,messages:hist})});
+        const data=await resp.json();
+        typDiv.remove();
+        custMsgs.push({id:uid(),from:"bot",text:data.content?.[0]?.text||"Bitte erneut.",time:tnow()});
+      } catch {typDiv.remove();custMsgs.push({id:uid(),from:"bot",text:"Verbindungsfehler.",time:tnow()});}
+      renderCustMsgs();
+    };
+
+    custInput.addEventListener("keydown",ev=>{if(ev.key==="Enter")sendCust();});
+    const sb=h("button",{style:{width:"32px",height:"32px",borderRadius:"50%",background:TP,border:"none",cursor:"pointer",color:"white",fontSize:"13px",flexShrink:0},onClick:sendCust},"➤");
+
+    body.appendChild(msgsDiv);
+    body.appendChild(h("div",{style:{padding:"10px 14px",borderTop:"0.5px solid #eee",display:"flex",gap:"8px",flexShrink:0}},custInput,sb));
+
+    function renderCustMsgs() {
+      msgsDiv.innerHTML="";
+      for (const m of custMsgs) {
+        const isMe=m.from==="user";
+        msgsDiv.appendChild(h("div",{style:{display:"flex",gap:"7px",alignItems:"flex-end",flexDirection:isMe?"row-reverse":"row"}},
+          !isMe?h("div",{style:{width:"24px",height:"24px",borderRadius:"50%",background:"#EEEDFE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"12px",flexShrink:0}},"🤖"):null,
+          h("div",{style:{borderRadius:"11px",padding:"8px 12px",fontSize:"13px",lineHeight:1.5,maxWidth:"78%",...(isMe?{background:TP,color:"white",borderBottomRightRadius:"3px"}:{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderBottomLeftRadius:"3px",color:"#222"})}},m.text)
+        ));
+      }
+      msgsDiv.scrollTop=msgsDiv.scrollHeight;
+    }
+    renderCustMsgs();
+  }
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
-function Settings() {
-  const [key,setKey] = useState(() => localStorage.getItem("altruan_api_key")||"");
-  const [saved,setSaved] = useState(false);
-  return e("div",{style:{padding:24,maxWidth:540}},
-    e("div",{style:{fontSize:15,fontWeight:500,marginBottom:4}},"Einstellungen"),
-    e("div",{style:{fontSize:12,color:"#888",marginBottom:20}},"Bot-Konfiguration"),
-    e("div",{style:{background:"white",border:"0.5px solid #e8e8e5",borderRadius:10,padding:16,marginBottom:14}},
-      e("div",{style:{fontSize:13,fontWeight:500,marginBottom:4}},"Anthropic API-Key"),
-      e("div",{style:{fontSize:12,color:"#888",marginBottom:10,lineHeight:1.5}},"Erhältlich unter ",e("a",{href:"https://console.anthropic.com",target:"_blank",rel:"noreferrer",style:{color:"#534AB7"}},"console.anthropic.com"),". Wird nur lokal gespeichert."),
-      e("input",{type:"password",value:key,onChange:ev=>setKey(ev.target.value),placeholder:"sk-ant-...",style:{width:"100%",padding:"8px 12px",borderRadius:7,border:"0.5px solid #ccc",fontSize:13,fontFamily:"monospace",boxSizing:"border-box",marginBottom:10}}),
-      e(Btn,{primary:true,onClick:()=>{localStorage.setItem("altruan_api_key",key);setSaved(true);setTimeout(()=>setSaved(false),2000);}},saved?"✓ Gespeichert":"Speichern")
-    ),
-    e("div",{style:{background:"#f8f8f7",border:"0.5px solid #e8e8e5",borderRadius:10,padding:16}},
-      e("div",{style:{fontSize:13,fontWeight:500,marginBottom:10}},"System-Info"),
-      [["Version","1.0.0"],["Modell","claude-sonnet-4-6"],["Sync Lieferungen","alle 3 Min"],["Sync Bestellungen","alle 20 Min"],["Sync Produkte","alle 60 Min"],["Jira-Eskalation","nach 2 Fehlversuchen"]].map(([k,v]) =>
-        e("div",{key:k,style:{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"0.5px solid #eee"}},e("span",{style:{color:"#888"}},k),e("span",{style:{fontWeight:500}},v))
-      )
+function renderSettings(container) {
+  container.innerHTML="";
+  const wrap=h("div",{style:{padding:"24px",maxWidth:"540px"}});
+  wrap.appendChild(h("div",{style:{fontSize:"15px",fontWeight:500,marginBottom:"4px"}},"Einstellungen"));
+  wrap.appendChild(h("div",{style:{fontSize:"12px",color:"#888",marginBottom:"20px"}},"Bot-Konfiguration"));
+
+  const keyInp=h("input",{type:"password",placeholder:"sk-ant-...",style:{width:"100%",padding:"8px 12px",borderRadius:"7px",border:"0.5px solid #ccc",fontSize:"13px",fontFamily:"monospace",boxSizing:"border-box",marginBottom:"10px"}});
+  keyInp.value=localStorage.getItem("altruan_api_key")||"";
+  const savedMsg=h("span",{style:{fontSize:"12px",color:"#3B6D11",marginLeft:"10px",display:"none"}},"✓ Gespeichert");
+  wrap.appendChild(h("div",{style:{background:"white",border:"0.5px solid #e8e8e5",borderRadius:"10px",padding:"16px",marginBottom:"14px"}},
+    h("div",{style:{fontSize:"13px",fontWeight:500,marginBottom:"4px"}},"Anthropic API-Key"),
+    h("div",{style:{fontSize:"12px",color:"#888",marginBottom:"10px",lineHeight:1.5}},"Erhältlich unter ",h("a",{href:"https://console.anthropic.com",target:"_blank",rel:"noreferrer",style:{color:"#534AB7"}},"console.anthropic.com"),". Wird nur lokal gespeichert."),
+    keyInp,
+    h("div",{style:{display:"flex",alignItems:"center"}},
+      btn("Speichern",true,()=>{localStorage.setItem("altruan_api_key",keyInp.value);savedMsg.style.display="inline";setTimeout(()=>savedMsg.style.display="none",2000);}),
+      savedMsg
     )
-  );
+  ));
+  wrap.appendChild(h("div",{style:{background:"#f8f8f7",border:"0.5px solid #e8e8e5",borderRadius:"10px",padding:"16px"}},
+    h("div",{style:{fontSize:"13px",fontWeight:500,marginBottom:"10px"}},"System-Info"),
+    ...[["Version","1.0.0"],["Modell","claude-sonnet-4-6"],["Sync Lieferungen","alle 3 Min"],["Sync Bestellungen","alle 20 Min"],["Sync Produkte","alle 60 Min"],["Jira-Eskalation","nach 2 Fehlversuchen"]].map(([k,v])=>
+      h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:"12px",padding:"4px 0",borderBottom:"0.5px solid #eee"}},h("span",{style:{color:"#888"}},k),h("span",{style:{fontWeight:500}},v))
+    )
+  ));
+  container.appendChild(wrap);
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
-const NAV = [
-  {id:"chat",label:"Chat",icon:"💬"},
-  {id:"dashboard",label:"Dashboard",icon:"📊"},
-  {id:"customer",label:"Kunden-Chat",icon:"🛍"},
-  {id:"apis",label:"API-Schnittstellen",icon:"🔌",adminOnly:true},
-  {id:"settings",label:"Einstellungen",icon:"⚙️"},
-];
-
-function App() {
-  const [view,setView] = useState("chat");
-  const [currentUser,setCurrentUser] = useState(USERS[0]);
-  const TITLES = {chat:"💬 Altruan Assistent",dashboard:"📊 Dashboard",customer:"🛍 Kunden-Chat",apis:"🔌 API-Schnittstellen",settings:"⚙️ Einstellungen"};
-  const SUBS = {chat:"Privater Chat · vertraulich",dashboard:"Ticket-Übersicht",customer:"Kunden-Portal",apis:"Schnittstellen verwalten",settings:"Bot-Konfiguration"};
-  return e("div",{style:{display:"grid",gridTemplateColumns:"200px 1fr",height:"100vh",background:"white"}},
-    e("div",{style:{background:"#f8f8f7",borderRight:"0.5px solid #e8e8e5",display:"flex",flexDirection:"column",minWidth:0}},
-      e("div",{style:{padding:"14px 16px",borderBottom:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",gap:10}},
-        e("div",{style:{width:30,height:30,background:TP,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}},"🤖"),
-        e("div",null,e("div",{style:{fontSize:13,fontWeight:500}},"Bot Manager"),e("div",{style:{fontSize:10,color:"#aaa"}},"Altruan KI-System"))
-      ),
-      e("div",{style:{padding:"10px 14px",borderBottom:"0.5px solid #e8e8e5"}},
-        e("div",{style:{fontSize:10,color:"#aaa",marginBottom:5}},"Angemeldet als:"),
-        e("select",{value:currentUser.id,onChange:ev=>setCurrentUser(USERS.find(u=>u.id===parseInt(ev.target.value))),style:{width:"100%",padding:"5px 8px",borderRadius:7,border:"0.5px solid #ccc",fontSize:11,background:"white"}},
-          USERS.map(u=>e("option",{key:u.id,value:u.id},u.name))
-        )
-      ),
-      e("div",{style:{flex:1,padding:"6px 0",overflowY:"auto"}},
-        e("div",{style:{fontSize:10,fontWeight:500,color:"#aaa",textTransform:"uppercase",letterSpacing:".06em",padding:"8px 16px 4px"}},"Navigation"),
-        NAV.filter(n=>!n.adminOnly||currentUser.admin).map(n =>
-          e("div",{key:n.id,onClick:()=>setView(n.id),style:{padding:"9px 16px",cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",gap:8,borderLeft:view===n.id?"2px solid #534AB7":"2px solid transparent",background:view===n.id?"white":"transparent",color:view===n.id?"#333":"#666",fontWeight:view===n.id?500:400,userSelect:"none"}},
-            e("span",null,n.icon),n.label,
-            n.adminOnly && e("span",{style:{fontSize:10,background:"#EEEDFE",color:"#534AB7",padding:"2px 6px",borderRadius:4,marginLeft:"auto"}},"Admin")
-          )
-        )
-      ),
-      e("div",{style:{padding:"12px 14px",borderTop:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",gap:8}},
-        e(Av,{init:currentUser.init,bg:currentUser.bg,tc:currentUser.tc,size:28}),
-        e("div",null,e("div",{style:{fontSize:12,fontWeight:500}},currentUser.name),e("div",{style:{fontSize:10,color:"#aaa"}},currentUser.role))
-      )
-    ),
-    e("div",{style:{display:"flex",flexDirection:"column",minWidth:0}},
-      e("div",{style:{padding:"11px 18px",borderBottom:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",justifyContent:"space-between",background:"white",flexShrink:0}},
-        e("div",null,e("div",{style:{fontSize:15,fontWeight:500,color:"#333"}},TITLES[view]),e("div",{style:{fontSize:11,color:"#aaa"}},SUBS[view])),
-        e("div",{style:{display:"flex",alignItems:"center",gap:8}},
-          e("div",{style:{width:8,height:8,borderRadius:"50%",background:"#639922"}}),
-          e("span",{style:{fontSize:11,color:"#888"}},"Systeme verbunden")
-        )
-      ),
-      e("div",{style:{flex:1,minHeight:0,overflow:"hidden"}},
-        view==="chat" && e(ChatView,{currentUser,allUsers:USERS,isAdmin:currentUser.admin}),
-        view==="dashboard" && e(Dashboard,null),
-        view==="customer" && e(CustomerChat,{onBack:()=>setView("chat")}),
-        view==="apis" && (currentUser.admin ? e(APIManager,null) : e("div",{style:{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",flexDirection:"column",gap:8,color:"#aaa"}},e("span",{style:{fontSize:32}},"🔒"),e("span",{style:{fontSize:14}},"Admin-Berechtigung erforderlich"))),
-        view==="settings" && e(Settings,null)
-      )
-    )
-  );
+function renderLocked(container) {
+  container.innerHTML="";
+  container.appendChild(h("div",{style:{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",flexDirection:"column",gap:"8px",color:"#aaa"}},
+    h("span",{style:{fontSize:"32px"}},"🔒"),
+    h("span",{style:{fontSize:"14px"}},"Admin-Berechtigung erforderlich")
+  ));
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(e(App,null));
+// ── Boot ──────────────────────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", renderShell);
 </script>
 </body>
 </html>
