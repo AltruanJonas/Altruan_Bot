@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Altruan Bot Manager</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0efeb;min-height:100vh}
+@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#ddd;border-radius:2px}
+input,select,button{font-family:inherit}
+</style>
+</head>
+<body>
+<div id="root" style="height:100vh"></div>
+<script>
+// Preload Babel config
+window.BABEL_OPTS = {presets:["react"]};
+</script>
+<script type="text/babel" data-presets="react">
+const {useState,useEffect,useRef,useCallback} = React;
+
+const TP="#464775";
+const USERS=[
+  {id:1,init:"TG",name:"Tobias Gumtow",role:"Leiter Logistik",admin:false,bg:"#CECBF6",tc:"#3C3489"},
+  {id:2,init:"NB",name:"Nina Becker",role:"Sachbearbeiterin",admin:false,bg:"#9FE1CB",tc:"#085041"},
+  {id:3,init:"LF",name:"Lars Fischer",role:"Lagerist",admin:false,bg:"#B5D4F4",tc:"#0C447C"},
+  {id:4,init:"AD",name:"Admin",role:"Vollzugriff",admin:true,bg:"#D3D1C7",tc:"#444441"},
+  {id:5,init:"JP",name:"Jonas Püttmann",role:"Administrator",admin:true,bg:"#CECBF6",tc:"#3C3489"},
+];
+
+const DEFAULT_APIS=[
+  {id:1,name:"Salesforce",cat:"CRM",key:"sf_••••••2b19",url:"api.salesforce.com/v58",env:"prod",status:"active"},
+  {id:2,name:"Zendesk",cat:"Ticketing",key:"zd_••••••5e72",url:"{tenant}.zendesk.com/api/v2",env:"prod",status:"warn"},
+  {id:3,name:"Jira",cat:"Ticketing",key:"jira_••••7d88",url:"{domain}.atlassian.net/rest/api/3",env:"prod",status:"active"},
+  {id:4,name:"Weclapp",cat:"ERP",key:"wc_••••••3f2a",url:"{tenant}.weclapp.com/webapp/api/v1",env:"prod",status:"active"},
+  {id:5,name:"Pulpo WMS",cat:"WMS",key:"pu_••••••9c41",url:"api.pulpo.com/v2",env:"prod",status:"active"},
+  {id:6,name:"DHL",cat:"Carrier",key:"dhl_•••••4a03",url:"api.dhl.com/v1",env:"prod",status:"active"},
+  {id:7,name:"DB Schenker",cat:"Carrier",key:"— ausstehend",url:"api.dbschenker.com/v1",env:"prod",status:"inactive"},
+  {id:8,name:"Microsoft Teams",cat:"Messaging",key:"az_••••••7b25",url:"smba.trafficmanager.net/amer",env:"stage",status:"warn"},
+  {id:9,name:"Shopify",cat:"Shop",key:"— ausstehend",url:"{shop}.myshopify.com/admin/api",env:"prod",status:"inactive"},
+  {id:10,name:"Miracle",cat:"Marktplatz",key:"— ausstehend",url:"api.miracle.cloud/v1",env:"prod",status:"inactive"},
+];
+
+const MOCK_ORDERS={
+  "ORD-10042":{email:"jonas.puettmann@altruan.de",name:"Jonas Püttmann",items:"Schreibtischlampe LED Pro × 2",status:"Versandt",carrier:"DHL",tracking:"1234567890",eta:"Morgen bis 18 Uhr"},
+  "TEST-0001":{email:"test@test.de",name:"Test Kunde",items:"Testartikel × 1",status:"Versandt",carrier:"DHL",tracking:"9876543210",eta:"Übermorgen"},
+};
+
+const SYS_PROMPT=`Du bist der Altruan Assistent – KI-Logistik-Assistent der Firma Altruan. Antworte immer auf Deutsch, präzise und freundlich.
+Verbundene Systeme: Weclapp (ERP), Pulpo WMS, Jira, Zendesk, Salesforce, DHL, DB Schenker, Shopify, Miracle (Amazon/Shop Apotheke), Microsoft Teams.
+Sync: Lieferungen alle 3 Min · Bestellungen alle 20 Min · Produkte alle 60 Min.
+Regeln: Bei Adressfehlern vollständige Adresse anfordern. Nach 2 Sync-Fehlern Jira-Ticket. Kurz und direkt antworten.`;
+
+const tnow=()=>{const d=new Date();return d.getHours()+":"+String(d.getMinutes()).padStart(2,"0");};
+const uid=()=>Date.now()+Math.random();
+const delay=ms=>new Promise(r=>setTimeout(r,ms));
+
+// UI primitives
+const Av=({init,bg,tc,size=32,online=false})=>(
+  <div style={{position:"relative",flexShrink:0}}>
+    <div style={{width:size,height:size,borderRadius:"50%",background:bg,color:tc,display:"flex",alignItems:"center",justifyContent:"center",fontSize:Math.round(size*.34),fontWeight:500}}>{init}</div>
+    {online&&<div style={{width:9,height:9,borderRadius:"50%",background:"#639922",position:"absolute",bottom:0,right:0,border:"2px solid white"}}/>}
+  </div>
+);
+
+const Btn=({children,primary,danger,onClick,small,disabled})=>(
+  <button onClick={onClick} disabled={disabled} style={{fontSize:small?11:12,padding:small?"4px 10px":"7px 14px",borderRadius:7,border:`0.5px solid ${primary?"#534AB7":danger?"#E24B4A":"#ccc"}`,background:primary?"#534AB7":danger?"#FCEBEB":"white",color:primary?"#EEEDFE":danger?"#A32D2D":"#444",cursor:disabled?"default":"pointer",opacity:disabled?.5:1,display:"inline-flex",alignItems:"center",gap:5}}>{children}</button>
+);
+
+const InfoCard=({color,icon,title,rows})=>(
+  <div style={{borderRadius:10,overflow:"hidden",border:`0.5px solid ${color.border}`,borderLeft:`3px solid ${color.strong}`,maxWidth:"88%",background:"white"}}>
+    <div style={{padding:"8px 12px",background:color.bg,color:color.text,fontSize:12,fontWeight:500}}>{icon} {title}</div>
+    <div style={{background:"#f8f8f7",padding:"7px 12px"}}>
+      {rows.map((r,i)=>(
+        <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"3px 0",borderBottom:i<rows.length-1?"0.5px solid #eee":"none"}}>
+          <span style={{color:"#888"}}>{r[0]}</span>
+          <span style={{fontWeight:500,color:r[2]==="red"?"#A32D2D":r[2]==="green"?"#3B6D11":r[2]==="amber"?"#854F0B":"#333"}}>{r[1]}</span>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+const TypingBubble=()=>(
+  <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+    <Av init="AA" bg="#EEEDFE" tc="#534AB7" size={26}/>
+    <div style={{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderRadius:11,borderBottomLeftRadius:3,padding:"9px 12px",display:"flex",gap:4}}>
+      {[0,150,300].map(d=><div key={d} style={{width:5,height:5,borderRadius:"50%",background:"#aaa",animation:`bounce .9s ${d}ms infinite`}}/>)}
+    </div>
+  </div>
+);
+
+const EANForm=({onSubmit,onCancel})=>{
+  const [e1,setE1]=useState(""); const [e2,setE2]=useState(""); const [err,setErr]=useState("");
+  const ok=v=>/^\d{8}$|^\d{13}$/.test(v);
+  const IS={width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #ccc",fontSize:12,fontFamily:"monospace",boxSizing:"border-box",marginBottom:8};
+  return(
+    <div style={{borderRadius:11,overflow:"hidden",border:"1.5px solid #534AB7",maxWidth:"90%"}}>
+      <div style={{padding:"9px 12px",background:"#EEEDFE",color:"#3C3489",fontSize:12,fontWeight:500}}>🔢 Fehlende EAN ergänzen – Bestellung P91111</div>
+      <div style={{padding:12,background:"white"}}>
+        <div style={{padding:"7px 10px",background:"#FAEEDA",borderRadius:7,borderLeft:"3px solid #EF9F27",marginBottom:9,fontSize:11,color:"#633806"}}><strong style={{color:"#854F0B"}}>2 Artikel ohne EAN</strong> – Transfer blockiert</div>
+        <div style={{fontSize:11,color:"#888",marginBottom:3}}>Artikel 1 – Schreibtischlampe LED Pro (WC-00441)</div>
+        <input value={e1} onChange={e=>setE1(e.target.value)} placeholder="EAN-13, z.B. 4006381333931" maxLength={14} style={IS}/>
+        <div style={{fontSize:11,color:"#888",marginBottom:3}}>Artikel 2 – USB-C Hub 7-Port (WC-00519)</div>
+        <input value={e2} onChange={e=>setE2(e.target.value)} placeholder="EAN-13, z.B. 4006381445021" maxLength={14} style={{...IS,marginBottom:err?6:0}}/>
+        {err&&<div style={{fontSize:11,color:"#A32D2D",marginBottom:4}}>{err}</div>}
+      </div>
+      <div style={{padding:"8px 12px",background:"#f8f8f7",display:"flex",gap:6,borderTop:"0.5px solid #eee"}}>
+        <Btn primary small onClick={()=>{if(!e1||!e2||!ok(e1)||!ok(e2)){setErr("Bitte gültige EAN-8 oder EAN-13 eingeben.");return;}onSubmit(e1,e2);}}>✓ EAN speichern</Btn>
+        <Btn small onClick={()=>onCancel("jira")}>Jira-Ticket</Btn>
+        <Btn small onClick={()=>onCancel("cancel")}>Abbrechen</Btn>
+      </div>
+    </div>
+  );
+};
+
+const AddrForm=({onSubmit,onCancel})=>{
+  const [f,setF]=useState({name:"",street:"",plz:"",city:"",land:"Deutschland"}); const [err,setErr]=useState("");
+  const IS={width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #ccc",fontSize:12,boxSizing:"border-box"};
+  return(
+    <div style={{borderRadius:11,overflow:"hidden",border:"1.5px solid #534AB7",maxWidth:"90%"}}>
+      <div style={{padding:"9px 12px",background:"#EEEDFE",color:"#3C3489",fontSize:12,fontWeight:500}}>📍 Vollständige Lieferadresse eingeben</div>
+      <div style={{padding:12,background:"white",display:"flex",flexDirection:"column",gap:7}}>
+        {[["Empfänger","name","Mustermann GmbH"],["Straße & Nr.","street","Musterstraße 12"]].map(([l,k,p])=>(
+          <div key={k}><div style={{fontSize:11,color:"#888",marginBottom:3}}>{l}</div><input value={f[k]} onChange={e=>setF(p2=>({...p2,[k]:e.target.value}))} placeholder={p} style={IS}/></div>
+        ))}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div><div style={{fontSize:11,color:"#888",marginBottom:3}}>PLZ</div><input value={f.plz} onChange={e=>setF(p=>({...p,plz:e.target.value}))} placeholder="80331" maxLength={5} style={IS}/></div>
+          <div><div style={{fontSize:11,color:"#888",marginBottom:3}}>Stadt</div><input value={f.city} onChange={e=>setF(p=>({...p,city:e.target.value}))} placeholder="München" style={IS}/></div>
+        </div>
+        <div><div style={{fontSize:11,color:"#888",marginBottom:3}}>Land</div><input value={f.land} onChange={e=>setF(p=>({...p,land:e.target.value}))} style={IS}/></div>
+        {err&&<div style={{fontSize:11,color:"#A32D2D"}}>{err}</div>}
+      </div>
+      <div style={{padding:"8px 12px",background:"#f8f8f7",display:"flex",gap:6,borderTop:"0.5px solid #eee"}}>
+        <Btn primary small onClick={()=>{if(!f.name||!f.street||!f.plz||!f.city){setErr("Alle Felder ausfüllen.");return;}onSubmit(f);}}>✓ Bestätigen</Btn>
+        <Btn small onClick={onCancel}>Abbrechen</Btn>
+      </div>
+    </div>
+  );
+};
+
+function ChatView({currentUser,allUsers,isAdmin}){
+  const [messages,setMessages]=useState({});
+  const [typing,setTyping]=useState(false);
+  const [input,setInput]=useState("");
+  const [activeUser,setActiveUser]=useState(allUsers.find(u=>!u.admin)||allUsers[0]);
+  const [syncState,setSyncState]=useState({running:false,remaining:600,attempts:0});
+  const syncRef=useRef(null);
+  const bottomRef=useRef(null);
+  const uid2=isAdmin?activeUser?.id:currentUser.id;
+
+  const getMsgs=useCallback(id=>messages[id]||[],[messages]);
+  const addMsg=useCallback((msg,id)=>setMessages(p=>({...p,[id||uid2]:[...(p[id||uid2]||[]),msg]})),[uid2]);
+
+  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[messages,typing,activeUser]);
+
+  useEffect(()=>{
+    const id=currentUser.id;
+    if(!messages[id]||!messages[id].length){
+      setTimeout(()=>addMsg({id:uid(),from:"bot",text:`Hallo ${currentUser.name.split(" ")[0]}! Ich bin der Altruan Assistent. Wie kann ich dir helfen?`,time:tnow()},id),500);
+    }
+  },[currentUser.id]); // eslint-disable-line
+
+  useEffect(()=>{
+    if(!syncState.running)return;
+    if(syncRef.current)clearInterval(syncRef.current);
+    syncRef.current=setInterval(()=>{
+      setSyncState(prev=>{
+        if(prev.remaining<=1){
+          clearInterval(syncRef.current);
+          const att=prev.attempts+1;
+          const cid=uid2;
+          setTimeout(()=>{
+            if(att>=2){
+              addMsg({id:uid(),from:"bot",time:tnow(),card:{color:{bg:"#FCEBEB",text:"#791F1F",border:"#F09595",strong:"#A32D2D"},icon:"🎫",title:"Jira TK-2045 erstellt",rows:[["Ticket","TK-2045","red"],["Priorität","Hoch","red"],["Zugewiesen","DevOps-Team",""],["Status","Offen","amber"]]}},cid);
+              addMsg({id:uid(),from:"bot",text:"Jira TK-2045 erstellt und DevOps-Team zugewiesen.",time:tnow()},cid);
+            }else{
+              addMsg({id:uid(),from:"bot",time:tnow(),card:{color:{bg:"#EAF3DE",text:"#27500A",border:"#97C459",strong:"#3B6D11"},icon:"✅",title:"Sync erfolgreich",rows:[["Datensätze","47 / 47","green"],["Dauer","11 Sek",""],["Fehler","0","green"]]}},cid);
+              addMsg({id:uid(),from:"bot",text:"Sync erfolgreich. Alle 47 Datensätze übertragen.",time:tnow()},cid);
+            }
+          },600);
+          return{...prev,running:false,remaining:600,attempts:att};
+        }
+        return{...prev,remaining:prev.remaining-1};
+      });
+    },1000);
+    return()=>clearInterval(syncRef.current);
+  },[syncState.running]); // eslint-disable-line
+
+  const handleEANSubmit=(e1,e2)=>{
+    setMessages(p=>({...p,[uid2]:(p[uid2]||[]).filter(m=>!m.form)}));
+    addMsg({id:uid(),from:"user",text:`EAN WC-00441: ${e1} · WC-00519: ${e2}`,time:tnow(),userId:currentUser.id},uid2);
+    setTyping(true);
+    setTimeout(()=>{
+      setTyping(false);
+      addMsg({id:uid(),from:"bot",time:tnow(),card:{color:{bg:"#EAF3DE",text:"#27500A",border:"#97C459",strong:"#3B6D11"},icon:"✅",title:"Stammdaten gespeichert – Sync OK",rows:[["EAN WC-00441",e1,"green"],["EAN WC-00519",e2,"green"],["Pulpo Transfer","12 / 12 Pos.","green"]]}},uid2);
+      addMsg({id:uid(),from:"bot",text:"EAN gespeichert, Bestellung P91111 vollständig in Pulpo übertragen.",time:tnow()},uid2);
+    },1800);
+  };
+
+  const handleAddrSubmit=addr=>{
+    setMessages(p=>({...p,[uid2]:(p[uid2]||[]).filter(m=>!m.form)}));
+    addMsg({id:uid(),from:"user",text:`${addr.name}, ${addr.street}, ${addr.plz} ${addr.city}`,time:tnow(),userId:currentUser.id},uid2);
+    setTyping(true);
+    setTimeout(()=>{
+      setTyping(false);
+      addMsg({id:uid(),from:"bot",time:tnow(),card:{color:{bg:"#EAF3DE",text:"#27500A",border:"#97C459",strong:"#3B6D11"},icon:"✅",title:"Adresse gespeichert",rows:[["Weclapp","Aktualisiert","green"],["Pulpo","Aktualisiert","green"],["DHL","Informiert","green"]]}},uid2);
+      addMsg({id:uid(),from:"bot",text:"Adresse korrigiert und DHL informiert.",time:tnow()},uid2);
+    },1800);
+  };
+
+  const handleInput=async(text,history)=>{
+    const t=text.toLowerCase();
+    if(t.includes("p91111")||(t.includes("ean")&&(t.includes("fehlt")||t.includes("fehlen")))||(t.includes("nicht")&&t.includes("pulpo"))){
+      setTyping(true);await delay(900);setTyping(false);
+      addMsg({id:uid(),from:"bot",time:tnow(),card:{color:{bg:"#E6F1FB",text:"#0C447C",border:"#85B7EB",strong:"#185FA5"},icon:"🔍",title:"Diagnose – P91111",rows:[["Weclapp","Freigegeben","green"],["Pulpo Transfer","3× Fehlgeschlagen","red"],["Ursache","Fehlende EAN","red"]]}},uid2);
+      await delay(400);setTyping(true);await delay(1000);setTyping(false);
+      addMsg({id:uid(),from:"bot",text:"2 Artikel ohne EAN blockieren den Transfer. Hast du die Nummern?",time:tnow(),form:"ean"},uid2);
+      return;
+    }
+    if((t.includes("adresse")&&(t.includes("fehler")||t.includes("falsch")))||t.includes("adressfehler")||t.includes("4821")){
+      setTyping(true);await delay(900);setTyping(false);
+      addMsg({id:uid(),from:"bot",text:"Adressfehler erkannt. Bitte gib die vollständige korrekte Lieferadresse ein.",time:tnow(),form:"address"},uid2);
+      return;
+    }
+    if(t.includes("sync")||t.includes("synchron")){
+      setTyping(true);await delay(700);setTyping(false);
+      if(syncState.running){addMsg({id:uid(),from:"bot",text:`Sync läuft – nächster Zyklus in ${Math.floor(syncState.remaining/60)}:${String(syncState.remaining%60).padStart(2,"0")} Min.`,time:tnow()},uid2);return;}
+      addMsg({id:uid(),from:"bot",text:"Sync-Überwachung gestartet. Ich melde mich nach dem nächsten Zyklus.",time:tnow()},uid2);
+      setSyncState(p=>({...p,running:true,remaining:30}));
+      return;
+    }
+    setTyping(true);
+    try{
+      const apiKey=localStorage.getItem("altruan_api_key")||"";
+      const msgs=[...history.slice(-12).map(m=>({role:m.from==="user"?"user":"assistant",content:m.text||(m.card?`[${m.card.title}]`:"")})).filter(m=>m.content.trim()),{role:"user",content:text}];
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json",...(apiKey?{"x-api-key":apiKey}:{})},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:800,system:SYS_PROMPT,messages:msgs})});
+      const data=await resp.json();
+      setTyping(false);
+      addMsg({id:uid(),from:"bot",text:data.content?.[0]?.text||"Bitte erneut versuchen.",time:tnow()},uid2);
+    }catch{
+      setTyping(false);
+      addMsg({id:uid(),from:"bot",text:"Verbindungsfehler. API-Key in Einstellungen prüfen.",time:tnow()},uid2);
+    }
+  };
+
+  const send=async()=>{
+    const text=input.trim();if(!text||typing)return;
+    setInput("");
+    const history=getMsgs(uid2);
+    addMsg({id:uid(),from:"user",text,time:tnow(),userId:currentUser.id},uid2);
+    await handleInput(text,history);
+  };
+
+  const chatMsgs=getMsgs(uid2);
+  const sm=Math.floor(syncState.remaining/60),ss=String(syncState.remaining%60).padStart(2,"0");
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      {syncState.running&&(
+        <div style={{background:"#E6F1FB",borderBottom:"0.5px solid #B5D4F4",padding:"5px 14px",fontSize:11,color:"#0C447C",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+          <span>🔄 Sync – nächster Zyklus in <strong>{sm}:{ss}</strong></span>
+          <div style={{width:70,height:3,background:"#B5D4F4",borderRadius:2,overflow:"hidden"}}><div style={{width:`${Math.round((600-syncState.remaining)/600*100)}%`,height:"100%",background:"#185FA5",transition:"width 1s"}}/></div>
+        </div>
+      )}
+      <div style={{padding:"10px 14px",borderBottom:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <Av init="AA" bg="#EEEDFE" tc="#534AB7" size={34} online/>
+          <div>
+            <div style={{fontSize:13,fontWeight:500}}>Altruan Assistent</div>
+            <div style={{fontSize:11,color:"#888",display:"flex",alignItems:"center",gap:4}}>
+              <span style={{width:6,height:6,borderRadius:"50%",background:"#639922",display:"inline-block"}}/>Online · KI-Assistent
+              {isAdmin&&activeUser&&<span style={{marginLeft:6,color:"#534AB7"}}>→ {activeUser.name}</span>}
+            </div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          {isAdmin&&<select onChange={e=>{const u=allUsers.find(x=>x.id===parseInt(e.target.value));if(u)setActiveUser(u);}} value={activeUser?.id} style={{fontSize:11,padding:"4px 7px",borderRadius:6,border:"0.5px solid #ccc",background:"white"}}>
+            {allUsers.filter(u=>!u.admin).map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>}
+          <span style={{fontSize:11,background:"#EAF3DE",color:"#3B6D11",padding:"2px 8px",borderRadius:4}}>🔒 Privat</span>
+          {isAdmin&&<span style={{fontSize:11,background:"#FAEEDA",color:"#854F0B",padding:"2px 8px",borderRadius:4}}>👁 Admin</span>}
+        </div>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:14,display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{textAlign:"center",fontSize:10,color:"#aaa"}}>{new Date().toLocaleDateString("de-DE",{day:"2-digit",month:"long",year:"numeric"})}</div>
+        {chatMsgs.map(msg=>{
+          const isMe=msg.from==="user";
+          const mu=isMe?(allUsers.find(u=>u.id===msg.userId)||currentUser):null;
+          if(msg.form==="ean")return(<div key={msg.id} style={{display:"flex",gap:8}}><Av init="AA" bg="#EEEDFE" tc="#534AB7" size={26}/><EANForm onSubmit={handleEANSubmit} onCancel={act=>{setMessages(p=>({...p,[uid2]:(p[uid2]||[]).filter(m=>!m.form)}));if(act==="jira"){setTyping(true);setTimeout(()=>{setTyping(false);addMsg({id:uid(),from:"bot",time:tnow(),card:{color:{bg:"#FCEBEB",text:"#791F1F",border:"#F09595",strong:"#A32D2D"},icon:"🎫",title:"Jira TK-2044 erstellt",rows:[["Ticket","TK-2044","red"],["Zugewiesen","Stammdaten-Team",""],["Status","Offen","amber"]]}},uid2);addMsg({id:uid(),from:"bot",text:"Ticket erstellt.",time:tnow()},uid2);},1400);}else addMsg({id:uid(),from:"bot",text:"Abgebrochen.",time:tnow()},uid2);}}/></div>);
+          if(msg.form==="address")return(<div key={msg.id} style={{display:"flex",gap:8}}><Av init="AA" bg="#EEEDFE" tc="#534AB7" size={26}/><AddrForm onSubmit={handleAddrSubmit} onCancel={()=>{setMessages(p=>({...p,[uid2]:(p[uid2]||[]).filter(m=>!m.form)}));addMsg({id:uid(),from:"bot",text:"Abgebrochen.",time:tnow()},uid2);}}/></div>);
+          return(<div key={msg.id} style={{display:"flex",gap:8,alignItems:"flex-end",flexDirection:isMe?"row-reverse":"row"}}>
+            {isMe?<Av init={mu?.init||"?"} bg={mu?.bg||"#eee"} tc={mu?.tc||"#333"} size={26}/>:<Av init="AA" bg="#EEEDFE" tc="#534AB7" size={26}/>}
+            <div style={{display:"flex",flexDirection:"column",gap:2,maxWidth:"80%",alignItems:isMe?"flex-end":"flex-start"}}>
+              {msg.card?<InfoCard color={msg.card.color} icon={msg.card.icon} title={msg.card.title} rows={msg.card.rows}/>:<div style={{borderRadius:11,padding:"9px 13px",fontSize:13,lineHeight:1.5,...(isMe?{background:TP,color:"white",borderBottomRightRadius:3}:{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderBottomLeftRadius:3,color:"#222"})}}>{msg.text}</div>}
+              <div style={{fontSize:10,color:"#aaa"}}>{msg.time}</div>
+            </div>
+          </div>);
+        })}
+        {typing&&<TypingBubble/>}
+        <div ref={bottomRef}/>
+      </div>
+      <div style={{padding:"10px 14px",borderTop:"0.5px solid #eee",display:"flex",gap:8,flexShrink:0}}>
+        <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} placeholder="Nachricht schreiben..." style={{flex:1,padding:"8px 14px",borderRadius:18,border:"0.5px solid #ccc",fontSize:13,outline:"none",background:"#f8f8f7"}}/>
+        <button onClick={send} style={{width:34,height:34,borderRadius:"50%",background:TP,border:"none",cursor:"pointer",color:"white",fontSize:14,flexShrink:0}}>➤</button>
+      </div>
+    </div>
+  );
+}
+
+const TICKETS=[
+  {id:"TK-1042",user:"Lars Becker",subj:"Lieferschein DC9 fehlt in Pulpo",status:"auto",rt:"0.4 Min",date:"Heute 09:12"},
+  {id:"TK-1041",user:"Nina Becker",subj:"Adressfehler Bestellung #4821",status:"auto",rt:"0.7 Min",date:"Heute 08:55"},
+  {id:"TK-1040",user:"Tobias Gumtow",subj:"Bestellung P91111 – EAN fehlt",status:"forwarded",rt:"1.2 Min",date:"Heute 08:33"},
+  {id:"TK-1039",user:"Lars Fischer",subj:"Weclapp Sync fehlgeschlagen",status:"open",rt:"—",date:"Heute 08:20"},
+  {id:"TK-1038",user:"Nina Becker",subj:"DHL-Tracking 1234567890",status:"forwarded",rt:"2.8 Min",date:"Gestern 17:44"},
+];
+const EMPS=[
+  {name:"Tobias Gumtow",init:"TG",bg:"#CECBF6",tc:"#3C3489",total:87,auto:61,fwd:19,open:7,rt:"1.2 Min"},
+  {name:"Nina Becker",init:"NB",bg:"#9FE1CB",tc:"#085041",total:74,auto:48,fwd:20,open:6,rt:"0.9 Min"},
+  {name:"Lars Fischer",init:"LF",bg:"#B5D4F4",tc:"#0C447C",total:65,auto:38,fwd:22,open:5,rt:"2.1 Min"},
+  {name:"Jonas Püttmann",init:"JP",bg:"#CECBF6",tc:"#3C3489",total:41,auto:32,fwd:7,open:2,rt:"0.8 Min"},
+];
+
+function Dashboard(){
+  const [filter,setFilter]=useState("all");
+  const ft=filter==="all"?TICKETS:TICKETS.filter(t=>t.status===filter);
+  const sP=s=>({auto:{bg:"#EAF3DE",c:"#3B6D11",l:"✓ Auto"},forwarded:{bg:"#EEEDFE",c:"#534AB7",l:"→ Weitergegeben"},open:{bg:"#FAEEDA",c:"#854F0B",l:"○ Offen"}}[s]);
+  const TH={padding:"9px 12px",textAlign:"left",fontSize:11,fontWeight:500,color:"#888",borderBottom:"0.5px solid #e8e8e5"};
+  const TD={padding:"9px 12px"};
+  return(
+    <div style={{padding:20,overflowY:"auto",height:"100%"}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:18}}>
+        {[["Tickets",TICKETS.length,"#333"],["Auto-gelöst",TICKETS.filter(t=>t.status==="auto").length,"#3B6D11"],["Weitergegeben",TICKETS.filter(t=>t.status==="forwarded").length,"#534AB7"],["Ø Antwortzeit","1.1 Min","#854F0B"]].map(([l,v,c])=>(
+          <div key={l} style={{background:"#f8f8f7",borderRadius:8,padding:"12px 14px"}}>
+            <div style={{fontSize:22,fontWeight:500,color:c}}>{v}</div>
+            <div style={{fontSize:11,color:"#888",marginTop:2}}>{l}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{fontSize:13,fontWeight:500,marginBottom:10}}>Mitarbeiter-Auswertung</div>
+      <div style={{border:"0.5px solid #e8e8e5",borderRadius:10,overflow:"hidden",marginBottom:18}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{background:"#f8f8f7"}}>{["Mitarbeiter","Gesamt","Verteilung","Auto-%","Ø Response"].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead>
+          <tbody>{EMPS.map(e=>{const ap=Math.round(e.auto/e.total*100);return(<tr key={e.name} style={{borderBottom:"0.5px solid #eee"}}>
+            <td style={TD}><div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:24,height:24,borderRadius:"50%",background:e.bg,color:e.tc,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:500}}>{e.init}</div>{e.name}</div></td>
+            <td style={{...TD,fontWeight:500}}>{e.total}</td>
+            <td style={{...TD,width:150}}><div style={{height:9,borderRadius:4,overflow:"hidden",display:"flex",gap:1}}><div style={{flex:e.auto,background:"#639922"}}/><div style={{flex:e.fwd,background:"#534AB7"}}/><div style={{flex:e.open,background:"#EF9F27"}}/></div><div style={{fontSize:10,color:"#aaa",marginTop:2}}>{e.auto} auto · {e.fwd} fwd</div></td>
+            <td style={{...TD,fontWeight:500,color:ap>=70?"#3B6D11":"#854F0B"}}>{ap}%</td>
+            <td style={{...TD,color:"#888"}}>{e.rt}</td>
+          </tr>);})}</tbody>
+        </table>
+      </div>
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        {[["all","Alle"],["auto","Auto-gelöst"],["forwarded","Weitergegeben"],["open","Offen"]].map(([v,l])=>(
+          <button key={v} onClick={()=>setFilter(v)} style={{fontSize:12,padding:"5px 12px",borderRadius:16,border:"0.5px solid",cursor:"pointer",fontFamily:"inherit",borderColor:filter===v?"#534AB7":"#ccc",background:filter===v?"#534AB7":"white",color:filter===v?"white":"#666"}}>{l}</button>
+        ))}
+      </div>
+      <div style={{border:"0.5px solid #e8e8e5",borderRadius:10,overflow:"hidden"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{background:"#f8f8f7"}}>{["ID","Erstellt von","Betreff","Status","Response","Datum"].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead>
+          <tbody>{ft.map(t=>{const sp=sP(t.status);return(<tr key={t.id} style={{borderBottom:"0.5px solid #eee"}}>
+            <td style={{...TD,fontFamily:"monospace",fontSize:11,color:"#888"}}>{t.id}</td>
+            <td style={TD}>{t.user}</td><td style={TD}>{t.subj}</td>
+            <td style={TD}><span style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:sp.bg,color:sp.c,fontWeight:500}}>{sp.l}</span></td>
+            <td style={{...TD,color:"#888"}}>{t.rt}</td>
+            <td style={{...TD,color:"#aaa",fontSize:11}}>{t.date}</td>
+          </tr>);})}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function APIManager(){
+  const [apis,setApis]=useState(()=>{try{const s=localStorage.getItem("altruan_apis");return s?JSON.parse(s):DEFAULT_APIS;}catch{return DEFAULT_APIS;}});
+  const [showAdd,setShowAdd]=useState(false);const [editId,setEditId]=useState(null);
+  const [form,setForm]=useState({name:"",cat:"ERP",url:"",key:"",env:"prod"});const [search,setSearch]=useState("");
+  useEffect(()=>{try{localStorage.setItem("altruan_apis",JSON.stringify(apis));}catch{}},[apis]);
+  const filtered=apis.filter(a=>a.name.toLowerCase().includes(search.toLowerCase()));
+  const sC=s=>s==="active"?"#3B6D11":s==="warn"?"#854F0B":"#A32D2D";
+  const sBg=s=>s==="active"?"#EAF3DE":s==="warn"?"#FAEEDA":"#FCEBEB";
+  const sL=s=>s==="active"?"✓ Aktiv":s==="warn"?"⚠ Warnung":"✕ Inaktiv";
+  const TH={padding:"9px 12px",textAlign:"left",fontSize:11,fontWeight:500,color:"#888",borderBottom:"0.5px solid #e8e8e5"};
+  const TD={padding:"10px 12px"};
+  const save=()=>{if(!form.name||!form.key)return;if(editId){setApis(p=>p.map(a=>a.id===editId?{...a,...form}:a));}else{setApis(p=>[...p,{...form,id:Date.now(),status:"active",checked:"jetzt"}]);}setShowAdd(false);setEditId(null);setForm({name:"",cat:"ERP",url:"",key:"",env:"prod"});};
+  return(
+    <div style={{padding:20,overflowY:"auto",height:"100%"}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
+        {[["Gesamt",apis.length,"#333"],["Aktiv",apis.filter(a=>a.status==="active").length,"#3B6D11"],["Warnung",apis.filter(a=>a.status==="warn").length,"#854F0B"],["Inaktiv",apis.filter(a=>a.status==="inactive").length,"#A32D2D"]].map(([l,v,c])=>(
+          <div key={l} style={{background:"#f8f8f7",borderRadius:8,padding:"12px 14px"}}><div style={{fontSize:22,fontWeight:500,color:c}}>{v}</div><div style={{fontSize:11,color:"#888",marginTop:2}}>{l}</div></div>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Suchen..." style={{flex:1,padding:"7px 12px",borderRadius:8,border:"0.5px solid #ccc",fontSize:13}}/>
+        <Btn primary onClick={()=>{setShowAdd(true);setEditId(null);setForm({name:"",cat:"ERP",url:"",key:"",env:"prod"});}}>+ API hinzufügen</Btn>
+      </div>
+      {showAdd&&(
+        <div style={{background:"#f0effc",border:"1px solid #AFA9EC",borderRadius:10,padding:16,marginBottom:16}}>
+          <div style={{fontSize:13,fontWeight:500,color:"#3C3489",marginBottom:12}}>{editId?"Bearbeiten":"Neue Schnittstelle"}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            {[["Name","name","z.B. FedEx"],["Basis-URL","url","https://api..."]].map(([l,k,p])=>(
+              <div key={k}><div style={{fontSize:11,color:"#888",marginBottom:4}}>{l}</div><input value={form[k]} onChange={e=>setForm(p2=>({...p2,[k]:e.target.value}))} placeholder={p} style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #ccc",fontSize:12,boxSizing:"border-box"}}/></div>
+            ))}
+            <div><div style={{fontSize:11,color:"#888",marginBottom:4}}>Kategorie</div><select value={form.cat} onChange={e=>setForm(p=>({...p,cat:e.target.value}))} style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #ccc",fontSize:12}}>{["CRM","ERP","WMS","Ticketing","Carrier","Messaging","Shop","Marktplatz"].map(c=><option key={c}>{c}</option>)}</select></div>
+            <div><div style={{fontSize:11,color:"#888",marginBottom:4}}>Umgebung</div><select value={form.env} onChange={e=>setForm(p=>({...p,env:e.target.value}))} style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #ccc",fontSize:12}}><option value="prod">Produktion</option><option value="stage">Staging</option></select></div>
+            <div style={{gridColumn:"1/-1"}}><div style={{fontSize:11,color:"#888",marginBottom:4}}>API-Key {editId&&<span style={{color:"#aaa"}}>(leer = unverändert)</span>}</div><input type="password" value={form.key} onChange={e=>setForm(p=>({...p,key:e.target.value}))} placeholder="sk-..." style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #ccc",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/></div>
+          </div>
+          <div style={{display:"flex",gap:8,marginTop:12}}><Btn primary onClick={save}>✓ Speichern</Btn><Btn onClick={()=>{setShowAdd(false);setEditId(null);}}>Abbrechen</Btn></div>
+        </div>
+      )}
+      <div style={{border:"0.5px solid #e8e8e5",borderRadius:10,overflow:"hidden"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{background:"#f8f8f7"}}>{["System","Kategorie","API-Key","Umgebung","Status",""].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead>
+          <tbody>{filtered.map(api=>(
+            <tr key={api.id} style={{borderBottom:"0.5px solid #eee"}}>
+              <td style={{...TD,fontWeight:500}}>{api.name}</td>
+              <td style={TD}><span style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:"#f0f0f0",color:"#555",fontWeight:500}}>{api.cat}</span></td>
+              <td style={{...TD,fontFamily:"monospace",fontSize:11,color:"#888"}}>{api.key}</td>
+              <td style={TD}><span style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:api.env==="prod"?"#EAF3DE":"#FAEEDA",color:api.env==="prod"?"#3B6D11":"#854F0B",fontWeight:500}}>{api.env==="prod"?"Prod":"Stage"}</span></td>
+              <td style={TD}><span style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:sBg(api.status),color:sC(api.status),fontWeight:500}}>{sL(api.status)}</span></td>
+              <td style={TD}><div style={{display:"flex",gap:4}}><Btn small onClick={()=>{setForm({name:api.name,cat:api.cat,url:api.url,key:"",env:api.env});setEditId(api.id);setShowAdd(true);}}>✎</Btn><Btn small danger onClick={()=>setApis(p=>p.filter(a=>a.id!==api.id))}>✕</Btn></div></td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function CustomerChat({onBack}){
+  const [step,setStep]=useState("select");const [mode,setMode]=useState(null);
+  const [verified,setVerified]=useState(null);const [ticket,setTicket]=useState(null);
+  const [msgs,setMsgs]=useState([]);const [input,setInput]=useState("");const [typing,setTyping]=useState(false);
+  const [af,setAf]=useState({name:"",email:"",phone:"",artikel:"",menge:""});const [afErr,setAfErr]=useState("");
+  const [vf,setVf]=useState({order:"",email:""});const [vErr,setVErr]=useState("");const [vLoad,setVLoad]=useState(false);
+  const bottomRef=useRef(null);
+  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[msgs,typing]);
+  useEffect(()=>{
+    if(step==="chat"&&!msgs.length){
+      const g=mode==="angebot"&&ticket?`Hallo ${ticket.name.split(" ")[0]}! Ticket ${ticket.nr} erfasst.`:verified?`Hallo ${verified.name.split(" ")[0]}! Bestellung ${verified.orderNr} gefunden.`:"Hallo!";
+      setTimeout(()=>setMsgs([{id:uid(),from:"bot",text:g,time:tnow()}]),400);
+    }
+  },[step]); // eslint-disable-line
+  const IS={width:"100%",padding:"9px 12px",borderRadius:9,border:"1.5px solid #e0dfd8",fontSize:13,outline:"none",boxSizing:"border-box",marginBottom:10};
+  const send=async()=>{
+    const text=input.trim();if(!text||typing)return;setInput("");
+    const history=[...msgs];setMsgs(p=>[...p,{id:uid(),from:"user",text,time:tnow()}]);setTyping(true);
+    try{
+      const apiKey=localStorage.getItem("altruan_api_key")||"";
+      const ctx=verified?`\nKunde: ${verified.name}\nBestellung: ${verified.orderNr}\nStatus: ${verified.status}\nTracking: ${verified.tracking}\nETA: ${verified.eta}`:(ticket?`\nTicket: ${ticket.nr}\nArtikel: ${ticket.artikel}`:"");
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json",...(apiKey?{"x-api-key":apiKey}:{})},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:600,system:`Du bist der Altruan Kunden-Assistent. Antworte auf Deutsch, freundlich.${ctx}`,messages:[...history.slice(-10).map(m=>({role:m.from==="user"?"user":"assistant",content:m.text||""})).filter(m=>m.content.trim()),{role:"user",content:text}]})});
+      const data=await resp.json();setTyping(false);setMsgs(p=>[...p,{id:uid(),from:"bot",text:data.content?.[0]?.text||"Bitte erneut versuchen.",time:tnow()}]);
+    }catch{setTyping(false);setMsgs(p=>[...p,{id:uid(),from:"bot",text:"Verbindungsfehler.",time:tnow()}]);}
+  };
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%",background:"white"}}>
+      <div style={{background:TP,padding:"10px 14px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        <button onClick={onBack} style={{background:"rgba(255,255,255,.15)",border:"none",borderRadius:6,padding:"3px 8px",color:"white",fontSize:11,cursor:"pointer"}}>← Zurück</button>
+        <div style={{width:28,height:28,borderRadius:"50%",background:"#EEEDFE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>🤖</div>
+        <div style={{fontSize:13,fontWeight:500,color:"white"}}>Altruan Kundenservice</div>
+      </div>
+      {step==="select"&&(
+        <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
+          <div style={{fontSize:22,marginBottom:8}}>🤖</div>
+          <div style={{fontSize:16,fontWeight:500,marginBottom:20}}>Wie können wir helfen?</div>
+          <div style={{width:"100%",maxWidth:300,display:"flex",flexDirection:"column",gap:10}}>
+            {[["📋","Anfrage Angebot","Angebot anfragen","angebot"],["📦","Anfrage Auftrag","Bestehende Bestellung","auftrag"]].map(([ico,t,d,m])=>(
+              <button key={m} onClick={()=>{setMode(m);setStep(m==="angebot"?"angebot-form":"verify");}} style={{padding:"14px 16px",borderRadius:11,border:"1.5px solid #e0dfd8",background:"white",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:12,fontFamily:"inherit"}}>
+                <div style={{width:34,height:34,borderRadius:9,background:m==="angebot"?"#EAF3DE":"#E6F1FB",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>{ico}</div>
+                <div><div style={{fontSize:14,fontWeight:500}}>{t}</div><div style={{fontSize:12,color:"#888"}}>{d}</div></div>
+                <span style={{marginLeft:"auto",color:"#ccc"}}>›</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {step==="angebot-form"&&(
+        <div style={{flex:1,overflowY:"auto",padding:20}}>
+          <button onClick={()=>setStep("select")} style={{background:"none",border:"none",cursor:"pointer",color:"#888",fontSize:13,marginBottom:14,fontFamily:"inherit"}}>← Zurück</button>
+          <div style={{fontSize:15,fontWeight:500,marginBottom:16}}>📋 Anfrage Angebot</div>
+          {[["Name","name","Vor- und Nachname","text"],["E-Mail","email","deine@email.de","email"],["Telefon","phone","+49 89 123456","tel"],["Artikel","artikel","Artikelname","text"],["Menge","menge","z.B. 50 Stück","text"]].map(([l,k,p,type])=>(
+            <div key={k}><div style={{fontSize:12,color:"#555",marginBottom:4,fontWeight:500}}>{l}</div><input type={type} value={af[k]} onChange={e=>setAf(p2=>({...p2,[k]:e.target.value}))} placeholder={p} style={{...IS,borderColor:afErr&&!af[k]?"#E24B4A":"#e0dfd8"}}/></div>
+          ))}
+          {afErr&&<div style={{fontSize:12,color:"#A32D2D",marginBottom:10}}>{afErr}</div>}
+          <Btn primary onClick={()=>{if(!af.name||!af.email||!af.phone||!af.artikel||!af.menge){setAfErr("Alle Felder ausfüllen.");return;}if(!/\S+@\S+\.\S+/.test(af.email)){setAfErr("Ungültige E-Mail.");return;}setTicket({nr:`ANG-${1000+Math.floor(Math.random()*999)}`,...af,created:new Date().toLocaleDateString("de-DE")});setStep("ticket-confirm");}}>Anfrage absenden →</Btn>
+        </div>
+      )}
+      {step==="verify"&&(
+        <div style={{flex:1,overflowY:"auto",padding:20}}>
+          <button onClick={()=>setStep("select")} style={{background:"none",border:"none",cursor:"pointer",color:"#888",fontSize:13,marginBottom:14,fontFamily:"inherit"}}>← Zurück</button>
+          <div style={{fontSize:15,fontWeight:500,marginBottom:16}}>📦 Anfrage Auftrag</div>
+          <div style={{fontSize:12,color:"#555",marginBottom:4,fontWeight:500}}>Bestellnummer</div>
+          <input value={vf.order} onChange={e=>setVf(p=>({...p,order:e.target.value}))} placeholder="z.B. ORD-10042" style={{...IS,fontFamily:"monospace"}}/>
+          <div style={{fontSize:12,color:"#555",marginBottom:4,fontWeight:500}}>E-Mail</div>
+          <input type="email" value={vf.email} onChange={e=>setVf(p=>({...p,email:e.target.value}))} placeholder="deine@email.de" style={IS}/>
+          {vErr&&<div style={{fontSize:12,color:"#A32D2D",marginBottom:8}}>{vErr}</div>}
+          <Btn primary disabled={vLoad||!vf.order||!vf.email} onClick={()=>{setVErr("");const key=vf.order.trim().toUpperCase();const em=vf.email.trim().toLowerCase();const found=MOCK_ORDERS[key];if(!found){setVErr("Bestellnummer nicht gefunden.");return;}if(found.email.toLowerCase()!==em){setVErr("E-Mail stimmt nicht überein.");return;}setVLoad(true);setTimeout(()=>{setVLoad(false);setVerified({orderNr:key,...found});setStep("chat");},1000);}}>{vLoad?"Wird geprüft…":"Weiter →"}</Btn>
+          <div style={{marginTop:12,background:"#f8f8f7",borderRadius:8,padding:"9px 11px",fontSize:11,color:"#888"}}><strong style={{color:"#666"}}>Test:</strong> ORD-10042 · jonas.puettmann@altruan.de</div>
+        </div>
+      )}
+      {step==="ticket-confirm"&&ticket&&(
+        <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{fontSize:28,marginBottom:8}}>✅</div>
+          <div style={{fontSize:16,fontWeight:500,marginBottom:6}}>Anfrage eingegangen!</div>
+          <div style={{fontSize:13,color:"#888",textAlign:"center",marginBottom:18,lineHeight:1.6}}>Unser Team meldet sich innerhalb 1 Werktag.</div>
+          <div style={{width:"100%",maxWidth:290,background:"#f8f8f7",borderRadius:10,overflow:"hidden",border:"0.5px solid #e8e8e5",marginBottom:16}}>
+            <div style={{background:TP,padding:"8px 13px",fontSize:12,fontWeight:500,color:"#EEEDFE",display:"flex",justifyContent:"space-between"}}><span>Ticket</span><span>{ticket.nr}</span></div>
+            {[["Name",ticket.name],["Artikel",ticket.artikel],["Menge",ticket.menge],["Telefon",ticket.phone]].map(([k,v])=>(
+              <div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"6px 13px",borderBottom:"0.5px solid #eee"}}><span style={{color:"#888"}}>{k}</span><span style={{fontWeight:500}}>{v}</span></div>
+            ))}
+          </div>
+          <Btn primary onClick={()=>setStep("chat")}>Weitere Fragen →</Btn>
+        </div>
+      )}
+      {step==="chat"&&(
+        <>
+          <div style={{flex:1,overflowY:"auto",padding:14,display:"flex",flexDirection:"column",gap:8}}>
+            {msgs.map(m=>{const isMe=m.from==="user";return(
+              <div key={m.id} style={{display:"flex",gap:7,alignItems:"flex-end",flexDirection:isMe?"row-reverse":"row"}}>
+                {!isMe&&<div style={{width:24,height:24,borderRadius:"50%",background:"#EEEDFE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0}}>🤖</div>}
+                <div style={{borderRadius:11,padding:"8px 12px",fontSize:13,lineHeight:1.5,maxWidth:"78%",...(isMe?{background:TP,color:"white",borderBottomRightRadius:3}:{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderBottomLeftRadius:3,color:"#222"})}}>{m.text}</div>
+              </div>
+            );})}
+            {typing&&<div style={{display:"flex",gap:7}}><div style={{width:24,height:24,borderRadius:"50%",background:"#EEEDFE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12}}>🤖</div><div style={{background:"#f1f0eb",border:"0.5px solid #e0dfd8",borderRadius:11,borderBottomLeftRadius:3,padding:"8px 12px",display:"flex",gap:4}}>{[0,150,300].map(d=><div key={d} style={{width:5,height:5,borderRadius:"50%",background:"#aaa",animation:`bounce .9s ${d}ms infinite`}}/>)}</div></div>}
+            <div ref={bottomRef}/>
+          </div>
+          <div style={{padding:"10px 14px",borderTop:"0.5px solid #eee",display:"flex",gap:8,flexShrink:0}}>
+            <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} placeholder="Deine Frage..." style={{flex:1,padding:"8px 13px",borderRadius:18,border:"1px solid #e0dfd8",fontSize:13,outline:"none",background:"#f8f8f7"}}/>
+            <button onClick={send} disabled={!input.trim()||typing} style={{width:32,height:32,borderRadius:"50%",background:input.trim()&&!typing?TP:"#ccc",border:"none",cursor:"pointer",color:"white",fontSize:13,flexShrink:0}}>➤</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Settings(){
+  const [key,setKey]=useState(()=>localStorage.getItem("altruan_api_key")||"");
+  const [saved,setSaved]=useState(false);
+  return(
+    <div style={{padding:24,maxWidth:540}}>
+      <div style={{fontSize:15,fontWeight:500,marginBottom:4}}>Einstellungen</div>
+      <div style={{fontSize:12,color:"#888",marginBottom:20}}>Bot-Konfiguration</div>
+      <div style={{background:"white",border:"0.5px solid #e8e8e5",borderRadius:10,padding:16,marginBottom:14}}>
+        <div style={{fontSize:13,fontWeight:500,marginBottom:4}}>Anthropic API-Key</div>
+        <div style={{fontSize:12,color:"#888",marginBottom:10,lineHeight:1.5}}>Erhältlich unter <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{color:"#534AB7"}}>console.anthropic.com</a>. Wird nur lokal gespeichert.</div>
+        <input type="password" value={key} onChange={e=>setKey(e.target.value)} placeholder="sk-ant-..." style={{width:"100%",padding:"8px 12px",borderRadius:7,border:"0.5px solid #ccc",fontSize:13,fontFamily:"monospace",boxSizing:"border-box",marginBottom:10}}/>
+        <Btn primary onClick={()=>{localStorage.setItem("altruan_api_key",key);setSaved(true);setTimeout(()=>setSaved(false),2000);}}>{saved?"✓ Gespeichert":"Speichern"}</Btn>
+      </div>
+      <div style={{background:"#f8f8f7",border:"0.5px solid #e8e8e5",borderRadius:10,padding:16}}>
+        <div style={{fontSize:13,fontWeight:500,marginBottom:10}}>System-Info</div>
+        {[["Version","1.0.0"],["Modell","claude-sonnet-4-6"],["Sync Lieferungen","alle 3 Min"],["Sync Bestellungen","alle 20 Min"],["Sync Produkte","alle 60 Min"],["Jira-Eskalation","nach 2 Fehlversuchen"]].map(([k,v])=>(
+          <div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"0.5px solid #eee"}}><span style={{color:"#888"}}>{k}</span><span style={{fontWeight:500}}>{v}</span></div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const NAV=[{id:"chat",label:"Chat",icon:"💬"},{id:"dashboard",label:"Dashboard",icon:"📊"},{id:"customer",label:"Kunden-Chat",icon:"🛍"},{id:"apis",label:"API-Schnittstellen",icon:"🔌",adminOnly:true},{id:"settings",label:"Einstellungen",icon:"⚙️"}];
+
+function App(){
+  const [view,setView]=useState("chat");
+  const [currentUser,setCurrentUser]=useState(USERS[0]);
+  const TITLES={chat:"💬 Altruan Assistent",dashboard:"📊 Dashboard",customer:"🛍 Kunden-Chat",apis:"🔌 API-Schnittstellen",settings:"⚙️ Einstellungen"};
+  const SUBS={chat:"Privater Chat · vertraulich",dashboard:"Ticket-Übersicht & Statistiken",customer:"Kunden-Portal",apis:"Schnittstellen verwalten – kein Code nötig",settings:"Bot-Konfiguration"};
+  return(
+    <div style={{display:"grid",gridTemplateColumns:"200px 1fr",height:"100vh",background:"white"}}>
+      <div style={{background:"#f8f8f7",borderRight:"0.5px solid #e8e8e5",display:"flex",flexDirection:"column",minWidth:0}}>
+        <div style={{padding:"14px 16px",borderBottom:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:30,height:30,background:TP,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>🤖</div>
+          <div><div style={{fontSize:13,fontWeight:500}}>Bot Manager</div><div style={{fontSize:10,color:"#aaa"}}>Altruan KI-System</div></div>
+        </div>
+        <div style={{padding:"10px 14px",borderBottom:"0.5px solid #e8e8e5"}}>
+          <div style={{fontSize:10,color:"#aaa",marginBottom:5}}>Angemeldet als:</div>
+          <select value={currentUser.id} onChange={e=>setCurrentUser(USERS.find(u=>u.id===parseInt(e.target.value)))} style={{width:"100%",padding:"5px 8px",borderRadius:7,border:"0.5px solid #ccc",fontSize:11,background:"white"}}>
+            {USERS.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+        </div>
+        <div style={{flex:1,padding:"6px 0",overflowY:"auto"}}>
+          <div style={{fontSize:10,fontWeight:500,color:"#aaa",textTransform:"uppercase",letterSpacing:".06em",padding:"8px 16px 4px"}}>Navigation</div>
+          {NAV.filter(n=>!n.adminOnly||currentUser.admin).map(n=>(
+            <div key={n.id} onClick={()=>setView(n.id)} style={{padding:"9px 16px",cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",gap:8,borderLeft:view===n.id?"2px solid #534AB7":"2px solid transparent",background:view===n.id?"white":"transparent",color:view===n.id?"#333":"#666",fontWeight:view===n.id?500:400,userSelect:"none"}}>
+              <span>{n.icon}</span>{n.label}
+              {n.adminOnly&&<span style={{fontSize:10,background:"#EEEDFE",color:"#534AB7",padding:"2px 6px",borderRadius:4,marginLeft:"auto"}}>Admin</span>}
+            </div>
+          ))}
+        </div>
+        <div style={{padding:"12px 14px",borderTop:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",gap:8}}>
+          <Av init={currentUser.init} bg={currentUser.bg} tc={currentUser.tc} size={28}/>
+          <div><div style={{fontSize:12,fontWeight:500}}>{currentUser.name}</div><div style={{fontSize:10,color:"#aaa"}}>{currentUser.role}</div></div>
+        </div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",minWidth:0}}>
+        <div style={{padding:"11px 18px",borderBottom:"0.5px solid #e8e8e5",display:"flex",alignItems:"center",justifyContent:"space-between",background:"white",flexShrink:0}}>
+          <div><div style={{fontSize:15,fontWeight:500,color:"#333"}}>{TITLES[view]}</div><div style={{fontSize:11,color:"#aaa"}}>{SUBS[view]}</div></div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:8,height:8,borderRadius:"50%",background:"#639922"}}/><span style={{fontSize:11,color:"#888"}}>Systeme verbunden</span></div>
+        </div>
+        <div style={{flex:1,minHeight:0,overflow:"hidden"}}>
+          {view==="chat"&&<ChatView currentUser={currentUser} allUsers={USERS} isAdmin={currentUser.admin}/>}
+          {view==="dashboard"&&<Dashboard/>}
+          {view==="customer"&&<CustomerChat onBack={()=>setView("chat")}/>}
+          {view==="apis"&&(currentUser.admin?<APIManager/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",flexDirection:"column",gap:8,color:"#aaa"}}><span style={{fontSize:32}}>🔒</span><span style={{fontSize:14}}>Admin-Berechtigung erforderlich</span></div>)}
+          {view==="settings"&&<Settings/>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
