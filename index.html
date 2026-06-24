@@ -146,12 +146,12 @@ function now(){var d=new Date();return ("0"+d.getHours()).slice(-2)+":"+("0"+d.g
 function uid(){return Math.random().toString(36).slice(2,8);}
 
 /* ---------- data ---------- */
-var USERS=[
-  {id:"u1",name:"Tobias Gumtow",role:"Logistik",init:"TG",bg:"#E3F0FF",tc:"#1C5FB8",admin:false},
-  {id:"u2",name:"Nina Becker",role:"Kundenservice",init:"NB",bg:"#FDE8F3",tc:"#B8327C",admin:false},
-  {id:"u3",name:"Lars Fischer",role:"Einkauf",init:"LF",bg:"#E7F6EC",tc:"#2C8C52",admin:false},
-  {id:"u4",name:"Admin",role:"Administrator",init:"AD",bg:"#EEEDFE",tc:"#534AB7",admin:true}
+var DEFAULT_USERS=[
+  {id:"u1",name:"Jonas Püttmann",email:"jonas.puettmann@altruan.de",password:"Admin#2026!",role:"Administrator",init:"JP",bg:"#EEEDFE",tc:"#534AB7",admin:true}
 ];
+function getUsers(){var raw=store.get("altruan_users");if(raw){try{var u=JSON.parse(raw);if(u&&u.length)return u;}catch(e){}}return DEFAULT_USERS.slice();}
+function saveUsers(u){store.set("altruan_users",JSON.stringify(u));}
+function initials(name){var p=(name||"?").trim().split(/\s+/);return ((p[0]||"?")[0]+(p[1]?p[1][0]:"")).toUpperCase();}
 
 var DEFAULT_APIS=[
   {id:"a1",name:"Weclapp",cat:"ERP",url:"https://altruan.weclapp.com/webapp/api/v1"},
@@ -226,24 +226,30 @@ var CUST_SYSTEM=
 
 /* ============================================================ APP ============ */
 var root=document.getElementById("root");
-var state={view:"chat",user:USERS[0]};
+var state={view:"chat",user:null};
 
 var NAV=[
   {id:"chat",label:"Chat",icon:"💬"},
   {id:"dashboard",label:"Dashboard",icon:"📊"},
   {id:"customer",label:"Kunden-Chat",icon:"🛍"},
+  {id:"users",label:"Benutzer",icon:"👥",adminOnly:true},
   {id:"apis",label:"API-Schnittstellen",icon:"🔌",adminOnly:true},
   {id:"settings",label:"Einstellungen",icon:"⚙️"}
 ];
-var TITLES={chat:"💬 Altruan Assistent",dashboard:"📊 Dashboard",customer:"🛍 Kunden-Chat",apis:"🔌 API-Schnittstellen",settings:"⚙️ Einstellungen"};
-var SUBS={chat:"Privater Chat · vertraulich",dashboard:"Ticket-Übersicht & Statistiken",customer:"Kunden-Portal",apis:"Schnittstellen verwalten – kein Code nötig",settings:"Bot-Konfiguration"};
+var TITLES={chat:"💬 Altruan Assistent",dashboard:"📊 Dashboard",customer:"🛍 Kunden-Chat",users:"👥 Benutzerverwaltung",apis:"🔌 API-Schnittstellen",settings:"⚙️ Einstellungen"};
+var SUBS={chat:"Privater Chat · vertraulich",dashboard:"Ticket-Übersicht & Statistiken",customer:"Kunden-Portal",users:"Benutzer & Zugangsdaten verwalten",apis:"Schnittstellen verwalten – kein Code nötig",settings:"Bot-Konfiguration"};
 
 function avatar(u,size){
-  return el("div",{class:"av",style:{width:size+"px",height:size+"px",background:u.bg,color:u.tc,fontSize:(size*0.36)+"px"}},u.init);
+  return el("div",{class:"av",style:{width:size+"px",height:size+"px",background:u.bg||"#EEEDFE",color:u.tc||"#534AB7",fontSize:(size*0.36)+"px"}},u.init||initials(u.name));
 }
 
 function render(){
   clear(root);
+  if(!state.user){root.appendChild(renderLogin());return;}
+  // safety: logged-in user might lack admin -> keep view valid
+  if((state.view==="users"||state.view==="apis")&&!state.user.admin)state.view="chat";
+
+  var visibleNav=NAV.filter(function(n){return !n.adminOnly||state.user.admin;});
   var side=el("div",{class:"side"},
     el("div",{class:"brand"},
       el("div",{class:"logo"},"🤖"),
@@ -252,7 +258,7 @@ function render(){
         el("div",{style:{fontSize:"10px",color:"var(--mut2)"}},"Altruan")
       )
     ),
-    el("div",{class:"nav"},NAV.map(function(n){
+    el("div",{class:"nav"},visibleNav.map(function(n){
       var active=state.view===n.id;
       return el("div",{class:"navitem"+(active?" active":""),onClick:function(){state.view=n.id;render();}},
         el("span",{},n.icon),
@@ -262,21 +268,16 @@ function render(){
     })),
     el("div",{class:"userbox"},
       avatar(state.user,30),
-      el("div",{},
+      el("div",{style:{flex:"1",minWidth:"0"}},
         el("div",{style:{fontSize:"12px",fontWeight:"500"}},state.user.name),
         el("div",{style:{fontSize:"10px",color:"var(--mut2)"}},state.user.role)
-      )
+      ),
+      el("button",{class:"sec",style:{padding:"4px 8px",fontSize:"11px"},title:"Abmelden",onClick:function(){
+        store.set("altruan_session","");state.user=null;state.view="chat";render();
+      }},"Logout")
     ),
     el("div",{class:"foot"},"© Altruan · Jonas Püttmann")
   );
-
-  // user switcher inside brand area (small select)
-  var switcher=el("select",{
-    style:{margin:"0 16px 10px",padding:"6px 8px",border:".5px solid #ccc",borderRadius:"7px",fontSize:"12px",width:"calc(100% - 32px)"},
-    onChange:function(e){state.user=USERS[e.target.selectedIndex];if(state.view==="apis"&&!state.user.admin){}render();}
-  },USERS.map(function(u){return el("option",{value:u.id},u.name+(u.admin?" (Admin)":""));}));
-  switcher.selectedIndex=USERS.indexOf(state.user);
-  side.insertBefore(switcher,side.querySelector(".userbox"));
 
   var topbar=el("div",{class:"topbar"},
     el("div",{},
@@ -290,10 +291,39 @@ function render(){
   if(state.view==="chat")content.appendChild(viewChat());
   else if(state.view==="dashboard")content.appendChild(viewDashboard());
   else if(state.view==="customer")content.appendChild(viewCustomer());
+  else if(state.view==="users")content.appendChild(state.user.admin?viewUsers():lock());
   else if(state.view==="apis")content.appendChild(state.user.admin?viewApis():lock());
   else if(state.view==="settings")content.appendChild(viewSettings());
 
   root.appendChild(el("div",{class:"layout"},side,el("div",{class:"main"},topbar,content)));
+}
+
+/* ---------- LOGIN ---------- */
+function renderLogin(){
+  var wrap=el("div",{style:{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--side)"}});
+  var emailI=el("input",{type:"email",placeholder:"E-Mail",style:{width:"100%",padding:"10px 12px",border:".5px solid #ccc",borderRadius:"8px",fontSize:"13.5px",marginBottom:"10px"}});
+  var passI=el("input",{type:"password",placeholder:"Passwort",style:{width:"100%",padding:"10px 12px",border:".5px solid #ccc",borderRadius:"8px",fontSize:"13.5px",marginBottom:"6px"}});
+  var errEl=el("div",{style:{fontSize:"12px",color:"#C53A3A",minHeight:"16px",marginBottom:"8px"}});
+  function attempt(){
+    var em=(emailI.value||"").trim().toLowerCase(), pw=passI.value||"";
+    var u=getUsers().filter(function(x){return (x.email||"").toLowerCase()===em&&x.password===pw;})[0];
+    if(!u){errEl.textContent="E-Mail oder Passwort ist falsch.";return;}
+    state.user=u;store.set("altruan_session",u.id);state.view="chat";render();
+  }
+  emailI.addEventListener("keydown",function(e){if(e.key==="Enter")passI.focus();});
+  passI.addEventListener("keydown",function(e){if(e.key==="Enter")attempt();});
+  var btn=el("button",{class:"pri",style:{width:"100%",padding:"11px",fontSize:"13.5px",marginTop:"4px"},onClick:attempt},"Anmelden");
+  var card=el("div",{style:{width:"330px",background:"#fff",border:".5px solid var(--bd)",borderRadius:"16px",padding:"30px 28px",boxShadow:"0 8px 30px rgba(0,0,0,.06)"}},
+    el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:"20px"}},
+      el("div",{class:"logo",style:{width:"46px",height:"46px",fontSize:"24px",marginBottom:"12px"}},"🤖"),
+      el("div",{style:{fontSize:"17px",fontWeight:"600"}},"Altruan Bot Manager"),
+      el("div",{style:{fontSize:"12px",color:"var(--mut)",marginTop:"3px"}},"Bitte anmelden")
+    ),
+    emailI,passI,errEl,btn,
+    el("div",{class:"foot",style:{marginTop:"14px"}},"© Altruan · Jonas Püttmann")
+  );
+  wrap.appendChild(card);
+  return wrap;
 }
 
 function lock(){return el("div",{class:"lock"},el("span",{style:{fontSize:"32px"}},"🔒"),el("span",{},"Admin-Berechtigung erforderlich"));}
@@ -346,7 +376,7 @@ function syncCard(){
 var chatMsgs={}; // per user id
 function viewChat(){
   var uidKey=state.user.id;
-  if(!chatMsgs[uidKey])chatMsgs[uidKey]=[{from:"bot",text:"Hallo "+state.user.name.split(" ")[0]+"! Ich bin dein Altruan Assistent. Womit kann ich helfen – EAN-Fehler, Adresse, Tracking oder Sync-Status?",time:now()}];
+  if(!chatMsgs[uidKey])chatMsgs[uidKey]=[{from:"bot",text:"Hallo "+state.user.name.split(" ")[0]+", womit kann ich dir behilflich sein?",time:now()}];
   var msgsArr=chatMsgs[uidKey];
 
   var box=el("div",{class:"msgs"});
@@ -594,7 +624,64 @@ function viewSettings(){
   return scroll;
 }
 
+/* ---------- USER MANAGEMENT ---------- */
+function viewUsers(){
+  var users=getUsers();
+  var scroll=el("div",{class:"scroll"});
+  function build(){
+    clear(scroll);
+    scroll.appendChild(el("button",{class:"pri",style:{marginBottom:"14px"},onClick:function(){editor(null);}},"+ Benutzer hinzufügen"));
+    users.forEach(function(u){
+      scroll.appendChild(el("div",{class:"api-card"},
+        avatar(u,34),
+        el("div",{style:{flex:"1",minWidth:"0"}},
+          el("div",{class:"nm"},u.name,u.admin?el("span",{class:"cat",style:{marginLeft:"8px"}},"Admin"):null,u.id===state.user.id?el("span",{style:{marginLeft:"8px",fontSize:"10px",color:"var(--grn)"}},"• aktiv"):null),
+          el("div",{class:"ur"},u.email+"  ·  "+u.role)),
+        el("button",{class:"sec",style:{padding:"5px 10px"},onClick:function(){editor(u);}},"Bearbeiten"),
+        el("button",{class:"sec",style:{padding:"5px 10px",color:"#C53A3A"},disabled:u.id===state.user.id,onClick:function(){
+          if(u.id===state.user.id)return;
+          if(users.length<=1){alert("Mindestens ein Benutzer muss bestehen bleiben.");return;}
+          users=users.filter(function(x){return x.id!==u.id;});saveUsers(users);build();
+        }},"Löschen")
+      ));
+    });
+  }
+  function editor(u){
+    var isNew=!u;u=u||{id:"u"+uid(),name:"",email:"",password:"",role:"Mitarbeiter",admin:false};
+    clear(scroll);
+    var f=el("div",{class:"setbox"},el("h2",{},isNew?"Neuer Benutzer":"Benutzer bearbeiten"));
+    function fld(l,id,v,type){var i=el("input",{id:id,value:v||"",type:type||"text"});return {row:el("div",{class:"field"},el("label",{},l),i),input:i};}
+    var n=fld("Name","u_name",u.name),e=fld("E-Mail","u_mail",u.email,"email"),p=fld("Passwort","u_pw",u.password),r=fld("Rolle / Abteilung","u_role",u.role);
+    var adminWrap=el("label",{style:{display:"flex",alignItems:"center",gap:"8px",fontSize:"12.5px",margin:"4px 0 12px"}});
+    var adminCb=el("input",{type:"checkbox",style:{width:"auto"}});if(u.admin)adminCb.checked=true;
+    adminWrap.appendChild(adminCb);adminWrap.appendChild(document.createTextNode("Administrator (Zugriff auf Benutzer & API-Schnittstellen)"));
+    f.appendChild(n.row);f.appendChild(e.row);f.appendChild(p.row);f.appendChild(r.row);f.appendChild(adminWrap);
+    var msg=el("div",{style:{fontSize:"12px",color:"#C53A3A",minHeight:"16px"}});
+    f.appendChild(msg);
+    f.appendChild(el("div",{style:{display:"flex",gap:"8px",marginTop:"4px"}},
+      el("button",{class:"pri",onClick:function(){
+        var name=n.input.value.trim(),mail=e.input.value.trim(),pw=p.input.value;
+        if(!name||!mail||!pw){msg.textContent="Name, E-Mail und Passwort sind erforderlich.";return;}
+        var dup=users.filter(function(x){return x.email.toLowerCase()===mail.toLowerCase()&&x.id!==u.id;})[0];
+        if(dup){msg.textContent="Diese E-Mail ist bereits vergeben.";return;}
+        u.name=name;u.email=mail;u.password=pw;u.role=r.input.value.trim()||"Mitarbeiter";u.admin=adminCb.checked;u.init=initials(name);
+        if(isNew)users.push(u);
+        if(u.id===state.user.id)state.user=u;
+        saveUsers(users);build();
+      }},"Speichern"),
+      el("button",{class:"sec",onClick:build},"Abbrechen")
+    ));
+    scroll.appendChild(f);
+  }
+  build();
+  return scroll;
+}
+
 /* ---------- boot ---------- */
+(function(){
+  var sid=store.get("altruan_session");
+  if(sid){var u=getUsers().filter(function(x){return x.id===sid;})[0];if(u)state.user=u;}
+})();
 render();
 
 })();
